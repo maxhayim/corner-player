@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Corner Player</string>
+    <string name="channel_name">Corner window</string>
+    <string name="notification_text">Playing in the corner. Open Corner Player to change or stop it.</string>
+</resources>

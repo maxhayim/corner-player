@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A screen with a small playing screen in its corner, inside the adaptive icon's safe zone. Own art. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:fillColor="#00000000" android:pathData="M34,38h40v30h-40z" />
+    <path android:fillColor="#FF9F43" android:pathData="M54,52h18v14h-18z" />
+</vector>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 16:9 banner: a screen with a smaller playing screen in its corner. Own art. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#101418" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#1E2630" android:pathData="M24,24h272v132h-272z" />
+    <path android:fillColor="#FF9F43" android:pathData="M180,92h100a6,6 0 0 1 6,6v42a6,6 0 0 1 -6,6h-100a6,6 0 0 1 -6,-6v-42a6,6 0 0 1 6,-6z" />
+    <path android:fillColor="#101418" android:pathData="M222,106l20,13l-20,13z" />
+</vector>
