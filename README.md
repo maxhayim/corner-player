@@ -130,7 +130,7 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
 
 <h2>Tested On</h2>
 
-<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The JVM tests cover the playlist reader, addresses, hiding camera passwords and the window's place.</p>
+<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. The JVM tests cover the playlist reader, addresses, hiding camera passwords and the window's place.</p>
 
 <h2>Origin</h2>
 
