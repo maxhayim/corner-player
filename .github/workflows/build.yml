@@ -1,0 +1,48 @@
+name: Build & Test Corner Player
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test and lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Build, run the JVM tests and lint
+        run: ./gradlew assembleRelease testReleaseUnitTest lintRelease --console=plain
+
+      # A CI build is signed with a throwaway debug key, for checking only. Releases carry the APK signed with
+      # the project's own key; install those.
+      - name: Upload the test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: corner-player-ci-apk
+          path: app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corner-player-reports
+          path: |
+            app/build/reports/
+            app/build/test-results/

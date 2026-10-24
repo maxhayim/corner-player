@@ -2,6 +2,15 @@ plugins {
     id 'com.android.application'
 }
 
+// SIGNING_PROPERTIES points at a signing.properties kept outside the repo (storeFile, storePassword, keyAlias,
+// keyPassword). Unset, release builds are signed with the debug key.
+def releaseKey = null
+def signingPath = System.getenv('SIGNING_PROPERTIES')
+if (signingPath != null && file(signingPath).exists()) {
+    releaseKey = new Properties()
+    file(signingPath).withInputStream { releaseKey.load(it) }
+}
+
 android {
     namespace 'io.github.maxhayim.cornerplayer'
     compileSdk 34
@@ -11,7 +20,18 @@ android {
         minSdk 26
         targetSdk 34
         versionCode 1
-        versionName '0.1'
+        versionName '0.1.0'
+    }
+
+    signingConfigs {
+        if (releaseKey != null) {
+            release {
+                storeFile file(releaseKey['storeFile'])
+                storePassword releaseKey['storePassword']
+                keyAlias releaseKey['keyAlias']
+                keyPassword releaseKey['keyPassword']
+            }
+        }
     }
 
     buildTypes {
@@ -19,8 +39,8 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // Sideloaded over ADB, never published: signed with the debug key, like the launcher.
-            signingConfig signingConfigs.debug
+            // The release key lives outside the repo (see release.sh); without it, the debug key, as in CI.
+            signingConfig releaseKey != null ? signingConfigs.release : signingConfigs.debug
         }
     }
 

@@ -1,5 +1,32 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradle and Android
 .gradle/
 build/
 app/build/
 local.properties
+*.apk
+*.aab
+
+# Signing: release keys live outside the repo, never here
+*.jks
+*.keystore
+signing.properties
+
+# Editors/IDEs
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# Logs & runtime
+*.log
+*.tmp
+
+# Backups
+*.bak
+
+# Pushed camera and playlist files (they can hold camera passwords)
 backup/
