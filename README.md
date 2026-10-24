@@ -1,6 +1,3 @@
-> [!WARNING]
-> **Corner Player is under active development** and not yet stable; features may still change. Give the repo a **Star** and **Watch** it to get notified when a new release lands.
-
 <p align="center">
   <img src="assets/logo.png" alt="Corner Player Logo" width="200"/>
 </p>
@@ -25,6 +22,8 @@
 <p>Corner Player is an open-source picture-in-picture app for Android TV. Your own camera (a baby monitor, the front door) or a stream from your own M3U playlist plays in a small window in a corner, over whatever you're watching: any app, Live TV or an HDMI input. The window never takes the remote's keys, so the app below keeps working as before, and it is silent unless you turn its sound on.</p>
 
 <p>It is for your own cameras and streams: it comes with no channels and points to none, and it only plays the addresses you give it.</p>
+
+<h2>Screenshots</h2>
 
 <p align="center">
   <img src="screenshot.jpg" alt="Corner Player on a TV, playing a test stream over Home" width="720"/>
