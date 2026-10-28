@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Picture in picture for Android TV: your own camera or stream, in a corner, over any app</strong>
+  <strong>Picture in picture for Android TV: your own camera, stream or HDMI input, in a corner, over any app</strong>
 </p>
 
 <p align="center">
@@ -13,13 +13,13 @@
   <a href="https://opensource.org/licenses/MIT">
     <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
   </a>
-  <img src="https://img.shields.io/badge/Sources-RTSP%20%7C%20HLS%20%7C%20M3U-lightgrey" alt="Sources: RTSP, HLS, M3U">
+  <img src="https://img.shields.io/badge/Sources-RTSP%20%7C%20HLS%20%7C%20M3U%20%7C%20HDMI-lightgrey" alt="Sources: RTSP, HLS, M3U, HDMI">
   <img src="https://img.shields.io/badge/Channels%20included-none-FF9F43" alt="No channels included">
 </p>
 
 <h1>Corner Player</h1>
 
-<p>Corner Player is an open-source picture-in-picture app for Android TV. Your own camera (a baby monitor, the front door) or a stream from your own M3U playlist plays in a small window in a corner, over whatever you're watching: any app, Live TV or an HDMI input. The window never takes the remote's keys, so the app below keeps working as before, and it is silent unless you turn its sound on.</p>
+<p>Corner Player is an open-source picture-in-picture app for Android TV. Your own camera (a baby monitor, the front door), a stream from your own M3U playlist or one of the TV's HDMI inputs plays in a small window in a corner, over whatever you're watching: any app, Live TV or an HDMI input. The window never takes the remote's keys, so the app below keeps working as before, and it is silent unless you turn its sound on.</p>
 
 <p>It is for your own cameras and streams: it comes with no channels and points to none, and it only plays the addresses you give it.</p>
 
@@ -37,6 +37,7 @@
   <li><strong>Over anything</strong>: Android TV's own picture in picture only works for apps that support it; Corner Player plays its own sources, so it works over any app, Live TV or an HDMI input</li>
   <li><strong>Your cameras</strong>: <code>rtsp://</code> and <code>http(s)://</code> cameras by name; add them on the TV or push them from a computer, so passwords are never typed on the TV</li>
   <li><strong>Your playlist</strong>: the channels of an M3U playlist you point it at</li>
+  <li><strong>HDMI inputs</strong>: on a TV with HDMI inputs, any of them (a game console, a set-top box, a camera's HDMI out) by the name the TV gives it</li>
   <li><strong>Any corner, three sizes</strong>: bottom right (default), bottom left, top left, top right; 25, 33 (default) or 40 % of the screen's width, 16:9</li>
   <li><strong>Hands off the remote</strong>: the window never takes focus or keys; the app below keeps working</li>
   <li><strong>Silent by default</strong>: sound off unless you switch it on</li>
@@ -50,7 +51,7 @@
 
 <ul>
   <li>An Android TV or Google TV device on <strong>Android 8 or newer</strong></li>
-  <li>Your own camera with an RTSP or HTTP stream, or your own M3U playlist, on a network the TV can reach</li>
+  <li>Your own camera with an RTSP or HTTP stream, or your own M3U playlist, on a network the TV can reach; or, on a TV, something plugged into one of its HDMI inputs</li>
   <li>To install: a computer with <a href="https://developer.android.com/tools/releases/platform-tools">ADB</a> and Developer options → Network debugging on the TV (the installer also allows the corner window, which many TVs hide)</li>
 </ul>
 
@@ -93,13 +94,14 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
 
 <h2>Usage</h2>
 
-<p>Open Corner Player (or its card) and press OK on a camera or channel: it starts in the corner and you're back to what you were watching. Open it again to switch, or press <strong>Stop</strong>.</p>
+<p>Open Corner Player (or its card) and press OK on a camera, channel or input: it starts in the corner and you're back to what you were watching. Open it again to switch, or press <strong>Stop</strong>.</p>
 
 <table>
   <tr><th>Row</th><th>What it does</th></tr>
   <tr><td><strong>Stop</strong></td><td>Closes the corner window (shown while one plays, focused first).</td></tr>
   <tr><td><strong>Cameras</strong></td><td>Your cameras by name; OK plays one. <strong>Add a camera</strong> asks for a name and an <code>rtsp://</code> or <code>http(s)://</code> address; <strong>Remove cameras</strong> (OK twice) removes them all.</td></tr>
   <tr><td><strong>Channels</strong></td><td>The channels of your playlist; OK plays one. <strong>Playlist address</strong> is an M3U playlist.</td></tr>
+  <tr><td><strong>Inputs</strong></td><td>The TV's HDMI (and other) inputs, by the names the TV shows; OK plays one. Boxes and sticks have none.</td></tr>
   <tr><td><strong>Corner</strong></td><td>Bottom right (default), bottom left, top left, top right.</td></tr>
   <tr><td><strong>Size</strong></td><td>25, 33 (default) or 40 % of the screen's width, 16:9.</td></tr>
   <tr><td><strong>Sound</strong></td><td>Off (default) or On.</td></tr>
@@ -107,7 +109,7 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
 
 <h2>How It Works</h2>
 
-<p>Corner Player draws a small, always-on-top window (Display over other apps) that never takes focus, so key presses keep going to the app underneath. A foreground service plays the stream into it with Media3 while the window is up, and stops with it.</p>
+<p>Corner Player draws a small, always-on-top window (Display over other apps) that never takes focus, so key presses keep going to the app underneath. A foreground service plays the stream into it with Media3 while the window is up, and stops with it. An HDMI input plays through Android's TV input framework (a <code>TvView</code>), the way the TV's own Live TV or Inputs app shows it; it needs no extra permission.</p>
 
 <table>
   <tr><th>Permission</th><th>Why</th></tr>
@@ -124,12 +126,13 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
   <li><strong>Two videos at once need two decoders.</strong> The corner and the app below each decode a video. Many TV chips have two decoders; some don't, or share them badly: on one test TV a second stream next to YouTube made YouTube stall. Prefer a camera's sub-stream, and check with what you watch.</li>
   <li><strong>Protected video</strong> (some streaming apps' DRM) may refuse to play while another window shows video, depending on the chip.</li>
   <li><strong>A pointer can't click through the window.</strong> Since Android 12 an overlay that lets touches through is drawn at most 80 % opaque, which would show what's underneath the video, so the corner window keeps touches. TVs have no touchscreen; with an air mouse, that one corner can't be clicked through.</li>
+  <li><strong>HDMI is up to the TV.</strong> Corner Player shows the inputs the TV lists for apps; some makers list none, or refuse a second app. Most TVs can show only one HDMI input at a time, so an HDMI input in the corner over another HDMI input (or over the TV's own tuner) usually won't work; over an app it should. With nothing on the input, the window says "No picture" and waits. On some chips (Realtek) a screenshot shows the HDMI picture's place wrongly; the TV itself shows it in the corner.</li>
   <li><strong>A stream that fails</strong> is retried once; then the window says it can't play and closes after a few seconds.</li>
 </ul>
 
 <h2>Tested On</h2>
 
-<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. The JVM tests cover the playlist reader, addresses, hiding camera passwords and the window's place.</p>
+<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. HDMI inputs (added for <a href="../../issues/1">#1</a>, v0.2.0): the same TV lists AV and HDMI1 to HDMI3; HDMI1 and HDMI2 opened in the bottom-right corner over Home with nothing plugged in, saying "No picture on HDMI1", and Stop let go of the input. A picture from a plugged-in device was not tried yet. The JVM tests cover the playlist reader, addresses and inputs, hiding camera passwords and the window's place.</p>
 
 <h2>Origin</h2>
 

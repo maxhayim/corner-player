@@ -82,6 +82,17 @@ public class CornerTest {
     }
 
     @Test
+    public void inputsAreNotAddresses() {
+        String hdmi = Corner.inputUrl("com.example.tvinput/.HdmiService/HW2");
+        assertTrue(Corner.isInput(hdmi));
+        assertEquals("com.example.tvinput/.HdmiService/HW2", Corner.inputId(hdmi));
+        assertFalse("an input is never fetched", Corner.validUrl(hdmi));
+        assertFalse(Corner.isInput("input:"));
+        assertFalse(Corner.isInput("rtsp://192.168.1.40/s"));
+        assertEquals(0, Corner.parseM3u("#EXTINF:-1,HDMI\n" + hdmi + "\n").size());
+    }
+
+    @Test
     public void sizesCycle() {
         assertEquals(33, Corner.nextSize(25));
         assertEquals(40, Corner.nextSize(33));

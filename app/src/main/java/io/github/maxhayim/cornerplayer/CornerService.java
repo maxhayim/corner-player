@@ -10,6 +10,9 @@ import android.content.pm.ServiceInfo;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
+import android.media.tv.TvContract;
+import android.media.tv.TvInputManager;
+import android.media.tv.TvView;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -31,7 +34,7 @@ import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 
 /**
- * Plays one stream in a small window in a corner, over whatever is on screen. The window never takes focus or
+ * Plays one stream, or one of the TV's inputs (HDMI), in a small window in a corner, over whatever is on screen. The window never takes focus or
  * keys, so the remote keeps controlling the app below; Corner Player's own screen changes or closes it.
  * Runs only while the window is up.
  */
@@ -49,8 +52,11 @@ public class CornerService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private WindowManager wm;
     private FrameLayout window;
+    /** Holds the picture: a TextureView for a stream, a TvView for an input. */
+    private FrameLayout screen;
     private TextView label;
     private ExoPlayer player;
+    private TvView tv;
     private boolean retried;
 
     static void play(Context c, String name, String url) {
@@ -100,7 +106,7 @@ public class CornerService extends Service {
         }
         String url = intent.getStringExtra(EXTRA_URL);
         String name = intent.getStringExtra(EXTRA_NAME);
-        if (!Corner.validUrl(url) || !canDraw(this)) {
+        if (!(Corner.validUrl(url) || Corner.isInput(url)) || !canDraw(this)) {
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -111,8 +117,7 @@ public class CornerService extends Service {
     @Override
     public void onDestroy() {
         main.removeCallbacksAndMessages(null);
-        if (player != null) player.release();
-        player = null;
+        release();
         if (window != null) {
             try {
                 wm.removeView(window);
@@ -134,12 +139,22 @@ public class CornerService extends Service {
         main.removeCallbacksAndMessages(null);
         retried = false;
         if (window == null) build();
+        if (window == null) return;
         label.setText(name);
         label.setAlpha(1f);
         label.animate().alpha(0f).setStartDelay(3000).setDuration(600).start();
-        if (player != null) player.release();
+        release();
+        screen.removeAllViews();
+        if (Corner.isInput(url)) showInput(name, Corner.inputId(url));
+        else showStream(name, url);
+        playing = name;
+    }
+
+    private void showStream(String name, String url) {
+        TextureView video = new TextureView(this);
+        screen.addView(video, new FrameLayout.LayoutParams(-1, -1));
         player = new ExoPlayer.Builder(this).build();
-        player.setVideoTextureView((TextureView) window.getChildAt(0));
+        player.setVideoTextureView(video);
         player.setVolume(Config.sound(this) ? 1f : 0f);
         player.addListener(new Player.Listener() {
             @Override
@@ -150,16 +165,63 @@ public class CornerService extends Service {
                     player.prepare();
                     return;
                 }
-                label.animate().cancel();
-                label.setText("Can't play " + name);
-                label.setAlpha(1f);
-                main.postDelayed(CornerService.this::stopSelf, CLOSE_AFTER_ERROR_MS);
+                failed(name);
             }
         });
         player.setMediaItem(MediaItem.fromUri(url));
         player.setPlayWhenReady(true);
         player.prepare();
-        playing = name;
+    }
+
+    /** An input of the TV itself (HDMI and the like), through the TV input framework, as Live TV shows it. */
+    private void showInput(String name, String inputId) {
+        tv = new TvView(this);
+        screen.addView(tv, new FrameLayout.LayoutParams(-1, -1));
+        tv.setCallback(new TvView.TvInputCallback() {
+            @Override
+            public void onConnectionFailed(String id) {
+                Log.w(TAG, "input connection failed: " + id);
+                failed(name);
+            }
+
+            @Override
+            public void onDisconnected(String id) {
+                Log.w(TAG, "input disconnected: " + id);
+                failed(name);
+            }
+
+            @Override
+            public void onVideoUnavailable(String id, int reason) {
+                if (reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_TUNING
+                        || reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_BUFFERING) return;
+                // Nothing plugged in, or the device on it is off: say so, and keep waiting for a picture.
+                label.animate().cancel();
+                label.setText("No picture on " + name);
+                label.setAlpha(1f);
+            }
+
+            @Override
+            public void onVideoAvailable(String id) {
+                label.setText(name);
+                label.animate().alpha(0f).setStartDelay(3000).setDuration(600).start();
+            }
+        });
+        tv.setStreamVolume(Config.sound(this) ? 1f : 0f);
+        tv.tune(inputId, TvContract.buildChannelUriForPassthroughInput(inputId));
+    }
+
+    private void failed(String name) {
+        label.animate().cancel();
+        label.setText("Can't play " + name);
+        label.setAlpha(1f);
+        main.postDelayed(CornerService.this::stopSelf, CLOSE_AFTER_ERROR_MS);
+    }
+
+    private void release() {
+        if (player != null) player.release();
+        player = null;
+        if (tv != null) tv.reset();
+        tv = null;
     }
 
     private void build() {
@@ -174,7 +236,8 @@ public class CornerService extends Service {
         });
         window.setClipToOutline(true);
         window.setElevation(8 * dp);
-        window.addView(new TextureView(this), new FrameLayout.LayoutParams(-1, -1));
+        screen = new FrameLayout(this);
+        window.addView(screen, new FrameLayout.LayoutParams(-1, -1));
         label = new TextView(this);
         label.setTextSize(13);
         label.setTextColor(Color.WHITE);
@@ -193,6 +256,7 @@ public class CornerService extends Service {
 
     private void layout() {
         if (player != null) player.setVolume(Config.sound(this) ? 1f : 0f);
+        if (tv != null) tv.setStreamVolume(Config.sound(this) ? 1f : 0f);
         if (window != null) wm.updateViewLayout(window, params());
     }
 

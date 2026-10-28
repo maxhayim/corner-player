@@ -3,6 +3,8 @@
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <!-- HDMI and the TV's other inputs, where it has them; boxes and sticks have none. -->
+    <uses-feature android:name="android.software.live_tv" android:required="false" />
 
     <!-- The streams you add (your cameras, your playlist), and nothing else. -->
     <uses-permission android:name="android.permission.INTERNET" />

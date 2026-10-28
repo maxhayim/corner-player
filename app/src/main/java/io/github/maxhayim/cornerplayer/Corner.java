@@ -17,6 +17,8 @@ final class Corner {
     static final int MAX_CAMERAS = 20;
     /** Window widths, in percent of the screen's. */
     static final int[] SIZES = {25, 33, 40};
+    /** A TV input (HDMI and the like) travels as "input:" and its id, like an address; never sent to a network. */
+    static final String INPUT = "input:";
 
     enum Place { BOTTOM_RIGHT, BOTTOM_LEFT, TOP_LEFT, TOP_RIGHT }
 
@@ -60,6 +62,18 @@ final class Corner {
         String u = url.trim().toLowerCase(Locale.ROOT);
         return (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("rtsp://") || u.startsWith("rtsps://"))
                 && !u.contains(" ") && u.indexOf("://") + 3 < u.length();
+    }
+
+    static String inputUrl(String inputId) {
+        return INPUT + inputId;
+    }
+
+    static boolean isInput(String url) {
+        return url != null && url.startsWith(INPUT) && url.length() > INPUT.length();
+    }
+
+    static String inputId(String url) {
+        return isInput(url) ? url.substring(INPUT.length()) : null;
     }
 
     /** The address as it may be shown: scheme, host and port, never the user name or password in it. */

@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.media.tv.TvInputInfo;
+import android.media.tv.TvInputManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -28,7 +30,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * The tile and module card open this: your cameras and your playlist's channels; OK plays one in the corner and
+ * The tile and module card open this: your cameras, your playlist's channels and the TV's inputs; OK plays one in the corner and
  * leaves this screen, so you're back to what you were watching with the window over it. Open the card again to
  * switch or stop. The window's corner, size and sound are set here too.
  */
@@ -129,7 +131,7 @@ public class MainActivity extends Activity {
         int focused = rows.indexOfChild(rows.getFocusedChild());
         rows.removeAllViews();
         String now = CornerService.playing;
-        status.setText(now != null ? "In the corner: " + now + "." : "Nothing in the corner. OK on a camera or channel plays it.");
+        status.setText(now != null ? "In the corner: " + now + "." : "Nothing in the corner. OK on a camera, channel or input plays it.");
         Row first = null;
         if (now != null) {
             first = add(new Row(this, "Stop", "Closes the corner window.", false, () -> {
@@ -200,6 +202,15 @@ public class MainActivity extends Activity {
                         }), null));
         pl.setValue(playlist.isEmpty() ? "Not set" : Corner.shown(playlist));
 
+        heading("Inputs");
+        List<Corner.Source> ins = inputs();
+        if (ins.isEmpty()) add(new Row(this, "No HDMI inputs", "This device shows apps none of its inputs.", false, null, null));
+        for (Corner.Source s : ins) {
+            Row r = add(new Row(this, s.name, null, false, () -> play(s), null));
+            if (s.name.equals(now)) r.setValue("Playing");
+            if (first == null) first = r;
+        }
+
         heading("Window");
         Row place = add(new Row(this, "Corner", null, false, () -> {
             Corner.Place next = Corner.Place.values()[(Config.place(this).ordinal() + 1) % Corner.Place.values().length];
@@ -235,6 +246,26 @@ public class MainActivity extends Activity {
         CornerService.play(this, s.name, s.url);
         // Back to what was playing, with the window over it.
         moveTaskToBack(true);
+    }
+
+    /** The TV's own inputs (HDMI and the like) by the names the TV gives them; none on a box or stick. */
+    private List<Corner.Source> inputs() {
+        List<Corner.Source> out = new ArrayList<>();
+        TvInputManager tim = getSystemService(TvInputManager.class);
+        if (tim == null) return out;
+        try {
+            for (TvInputInfo i : tim.getTvInputList()) {
+                if (!i.isPassthroughInput() || i.isHidden(this)) continue;
+                CharSequence label = i.loadCustomLabel(this);
+                if (label == null || label.length() == 0) label = i.loadLabel(this);
+                out.add(new Corner.Source(label.toString(), Corner.inputUrl(i.getId()), false));
+            }
+        } catch (RuntimeException e) {
+            // The TV's input service is missing or broken: no inputs.
+        }
+        // The TV lists them in no order: HDMI1, HDMI2, ... by name.
+        out.sort((x, y) -> x.name.compareToIgnoreCase(y.name));
+        return out;
     }
 
     private void addCamera() {
