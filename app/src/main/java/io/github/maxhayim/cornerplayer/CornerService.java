@@ -138,15 +138,21 @@ public class CornerService extends Service {
     private void show(String name, String url) {
         main.removeCallbacksAndMessages(null);
         retried = false;
-        if (window == null) build();
+        boolean input = Corner.isInput(url);
+        if (window == null) build(input);
         if (window == null) return;
+        label.animate().cancel();
         label.setText(name);
         label.setAlpha(1f);
-        label.animate().alpha(0f).setStartDelay(3000).setDuration(600).start();
         release();
         screen.removeAllViews();
-        if (Corner.isInput(url)) showInput(name, Corner.inputId(url));
-        else showStream(name, url);
+        frame(input);
+        if (input) {
+            showInput(name, Corner.inputId(url));
+        } else {
+            fadeLabel();
+            showStream(name, url);
+        }
         playing = name;
     }
 
@@ -177,6 +183,7 @@ public class CornerService extends Service {
     private void showInput(String name, String inputId) {
         tv = new TvView(this);
         screen.addView(tv, new FrameLayout.LayoutParams(-1, -1));
+        // The name stays up until the TV says a picture is there, so a black window tells which side it's stuck on.
         tv.setCallback(new TvView.TvInputCallback() {
             @Override
             public void onConnectionFailed(String id) {
@@ -192,6 +199,7 @@ public class CornerService extends Service {
 
             @Override
             public void onVideoUnavailable(String id, int reason) {
+                Log.i(TAG, "input video unavailable: " + reason);
                 if (reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_TUNING
                         || reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_BUFFERING) return;
                 // Nothing plugged in, or the device on it is off: say so, and keep waiting for a picture.
@@ -202,12 +210,23 @@ public class CornerService extends Service {
 
             @Override
             public void onVideoAvailable(String id) {
+                Log.i(TAG, "input video available");
                 label.setText(name);
-                label.animate().alpha(0f).setStartDelay(3000).setDuration(600).start();
+                fadeLabel();
+            }
+
+            @Override
+            public void onVideoSizeChanged(String id, int width, int height) {
+                Log.i(TAG, "input video size: " + width + "x" + height);
             }
         });
         tv.setStreamVolume(Config.sound(this) ? 1f : 0f);
+        Log.i(TAG, "tuning input " + inputId);
         tv.tune(inputId, TvContract.buildChannelUriForPassthroughInput(inputId));
+    }
+
+    private void fadeLabel() {
+        label.animate().alpha(0f).setStartDelay(3000).setDuration(600).start();
     }
 
     private void failed(String name) {
@@ -224,7 +243,7 @@ public class CornerService extends Service {
         tv = null;
     }
 
-    private void build() {
+    private void build(boolean input) {
         window = new FrameLayout(this);
         window.setBackgroundColor(Color.BLACK);
         float dp = getResources().getDisplayMetrics().density;
@@ -234,8 +253,7 @@ public class CornerService extends Service {
                 o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 12 * dp);
             }
         });
-        window.setClipToOutline(true);
-        window.setElevation(8 * dp);
+        frame(input);
         screen = new FrameLayout(this);
         window.addView(screen, new FrameLayout.LayoutParams(-1, -1));
         label = new TextView(this);
@@ -252,6 +270,15 @@ public class CornerService extends Service {
             window = null;
             stopSelf();
         }
+    }
+
+    /**
+     * Rounded corners and a shadow for a stream. An input's picture is a hardware video layer: many TV chips can only
+     * show it unclipped and without a shadow, and show black otherwise.
+     */
+    private void frame(boolean input) {
+        window.setClipToOutline(!input);
+        window.setElevation(input ? 0 : 8 * getResources().getDisplayMetrics().density);
     }
 
     private void layout() {
