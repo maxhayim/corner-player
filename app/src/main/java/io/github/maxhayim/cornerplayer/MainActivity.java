@@ -4,8 +4,10 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.media.tv.TvInputInfo;
-import android.media.tv.TvInputManager;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -21,6 +23,7 @@ import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.net.Inet4Address;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -46,6 +49,8 @@ public class MainActivity extends Activity {
     private String playlistProblem;
     /** OK pressed once on Remove cameras: a second press removes them. */
     private boolean removeArmed;
+    /** OK pressed once on New token: a second press replaces it. */
+    private boolean tokenArmed;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,6 +81,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         Config.importPushed(this);
+        RemoteService.sync(this);
         build();
         loadPlaylist();
     }
@@ -203,7 +209,7 @@ public class MainActivity extends Activity {
         pl.setValue(playlist.isEmpty() ? "Not set" : Corner.shown(playlist));
 
         heading("Inputs");
-        List<Corner.Source> ins = inputs();
+        List<Corner.Source> ins = CornerService.inputs(this);
         if (ins.isEmpty()) add(new Row(this, "No HDMI inputs", "This device shows apps none of its inputs.", false, null, null));
         for (Corner.Source s : ins) {
             Row r = add(new Row(this, s.name, null, false, () -> play(s), null));
@@ -232,10 +238,62 @@ public class MainActivity extends Activity {
         }, null));
         sound.setValue(Config.sound(this) ? "On" : "Off");
 
+        heading("Network control");
+        boolean remote = Config.remote(this);
+        Row on = add(new Row(this, "Network control", "Home Assistant, a doorbell or any device on your network opens a"
+                + " camera or input in the corner, or closes it, with the token below.", false, () -> {
+            Config.setRemote(this, !Config.remote(this));
+            RemoteService.sync(this);
+            main.postDelayed(this::build, 300);
+        }, null));
+        on.setValue(remote ? "On" : "Off");
+        if (remote) {
+            String problem = RemoteService.problem;
+            add(new Row(this, "Address", problem != null ? problem
+                    : "POST /play with name=a camera or input, or url=; POST /stop; GET /status.", false, null, null))
+                    .setValue(address());
+            add(new Row(this, "Token", "Sent as the header Authorization: Bearer and the token.", false, null, null))
+                    .setValue(Config.token(this));
+            Row nt = add(new Row(this, "New token", "Your automations stop working until they have the new one.", false, () -> {
+                if (!tokenArmed) {
+                    tokenArmed = true;
+                    build();
+                    main.postDelayed(() -> {
+                        tokenArmed = false;
+                        build();
+                    }, 5000);
+                    return;
+                }
+                tokenArmed = false;
+                Config.newToken(this);
+                build();
+            }, null));
+            if (tokenArmed) nt.setValue("OK again: replace");
+        }
+
         View keep = focused >= 0 && focused < rows.getChildCount() ? rows.getChildAt(focused) : null;
         if (keep != null && keep.isFocusable()) keep.requestFocus();
         else if (first != null) first.requestFocus();
         else place.requestFocus();
+    }
+
+    /** This TV's address on the home network, for the network control's requests. */
+    private String address() {
+        try {
+            ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+            Network n = cm.getActiveNetwork();
+            LinkProperties lp = n == null ? null : cm.getLinkProperties(n);
+            if (lp != null) {
+                for (LinkAddress a : lp.getLinkAddresses()) {
+                    if (a.getAddress() instanceof Inet4Address && !a.getAddress().isLoopbackAddress()) {
+                        return "http://" + a.getAddress().getHostAddress() + ":" + RemoteService.PORT;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // No network: the port alone.
+        }
+        return "Port " + RemoteService.PORT;
     }
 
     private void play(Corner.Source s) {
@@ -246,26 +304,6 @@ public class MainActivity extends Activity {
         CornerService.play(this, s.name, s.url);
         // Back to what was playing, with the window over it.
         moveTaskToBack(true);
-    }
-
-    /** The TV's own inputs (HDMI and the like) by the names the TV gives them; none on a box or stick. */
-    private List<Corner.Source> inputs() {
-        List<Corner.Source> out = new ArrayList<>();
-        TvInputManager tim = getSystemService(TvInputManager.class);
-        if (tim == null) return out;
-        try {
-            for (TvInputInfo i : tim.getTvInputList()) {
-                if (!i.isPassthroughInput() || i.isHidden(this)) continue;
-                CharSequence label = i.loadCustomLabel(this);
-                if (label == null || label.length() == 0) label = i.loadLabel(this);
-                out.add(new Corner.Source(label.toString(), Corner.inputUrl(i.getId()), false));
-            }
-        } catch (RuntimeException e) {
-            // The TV's input service is missing or broken: no inputs.
-        }
-        // The TV lists them in no order: HDMI1, HDMI2, ... by name.
-        out.sort((x, y) -> x.name.compareToIgnoreCase(y.name));
-        return out;
     }
 
     private void addCamera() {

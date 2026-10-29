@@ -3,12 +3,15 @@ package io.github.maxhayim.cornerplayer;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 
 public class CornerTest {
     @Test
@@ -90,6 +93,51 @@ public class CornerTest {
         assertFalse(Corner.isInput("input:"));
         assertFalse(Corner.isInput("rtsp://192.168.1.40/s"));
         assertEquals(0, Corner.parseM3u("#EXTINF:-1,HDMI\n" + hdmi + "\n").size());
+    }
+
+    @Test
+    public void networkControlFindsSourcesByName() {
+        List<Corner.Source> cams = Arrays.asList(new Corner.Source("Front door", "rtsp://192.168.1.40/s", true),
+                new Corner.Source("Nursery", "rtsp://192.168.1.41/s", true));
+        assertEquals("Front door", Corner.find(cams, "  front DOOR ").name);
+        assertNull(Corner.find(cams, "Garage"));
+        assertNull(Corner.find(cams, ""));
+        assertNull(Corner.find(cams, null));
+    }
+
+    @Test
+    public void networkControlReadsQueries() {
+        Map<String, String> q = Corner.query("name=Front+door&seconds=60&url=rtsp%3A%2F%2F192.168.1.40%2Fs&bad=%zz");
+        assertEquals("Front door", q.get("name"));
+        assertEquals("60", q.get("seconds"));
+        assertEquals("rtsp://192.168.1.40/s", q.get("url"));
+        assertFalse("a bad escape is left out", q.containsKey("bad"));
+        assertTrue(Corner.query(null).isEmpty());
+    }
+
+    @Test
+    public void networkControlSecondsAreCapped() {
+        assertEquals(60, Corner.seconds("60"));
+        assertEquals(0, Corner.seconds("-5"));
+        assertEquals(0, Corner.seconds("soon"));
+        assertEquals(0, Corner.seconds(null));
+        assertEquals(Corner.MAX_SECONDS, Corner.seconds("999999"));
+    }
+
+    @Test
+    public void networkControlNeedsTheToken() {
+        String token = Corner.newToken(new Random(7));
+        assertEquals(Corner.TOKEN_LENGTH, token.length());
+        assertTrue(Corner.validToken(token));
+        assertFalse("no look-alike letters", token.matches(".*[01ilo].*"));
+        assertTrue(Corner.authorized(token, "Bearer " + token));
+        assertTrue(Corner.authorized(token, "bearer " + token + " "));
+        assertFalse(Corner.authorized(token, token));
+        assertFalse(Corner.authorized(token, "Bearer " + token + "x"));
+        assertFalse(Corner.authorized(token, null));
+        assertFalse("no token set: nobody gets in", Corner.authorized("", "Bearer "));
+        assertFalse(Corner.validToken("short"));
+        assertFalse(Corner.validToken("has spaces in it, sixteen+"));
     }
 
     @Test

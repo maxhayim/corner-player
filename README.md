@@ -38,11 +38,12 @@
   <li><strong>Your cameras</strong>: <code>rtsp://</code> and <code>http(s)://</code> cameras by name; add them on the TV or push them from a computer, so passwords are never typed on the TV</li>
   <li><strong>Your playlist</strong>: the channels of an M3U playlist you point it at</li>
   <li><strong>HDMI inputs</strong>: on a TV with HDMI inputs, any of them (a game console, a set-top box, a camera's HDMI out) by the name the TV gives it</li>
+  <li><strong>Network control</strong>: Home Assistant, a doorbell or any device on your network opens a camera or input in the corner with an HTTP request, for as long as you like, and closes it; off unless you switch it on, and every request needs the TV's token</li>
   <li><strong>Any corner, three sizes</strong>: bottom right (default), bottom left, top left, top right; 25, 33 (default) or 40 % of the screen's width, 16:9</li>
   <li><strong>Hands off the remote</strong>: the window never takes focus or keys; the app below keeps working</li>
   <li><strong>Silent by default</strong>: sound off unless you switch it on</li>
   <li><strong>Passwords stay hidden</strong>: on screen, addresses show only the scheme, host and port</li>
-  <li><strong>Private</strong>: connects only to the addresses you give it; no telemetry, no update checks, no ads</li>
+  <li><strong>Private</strong>: connects only to the addresses you give it, and listens only when you switch network control on; no telemetry, no update checks, no ads</li>
   <li>Playback by <a href="https://developer.android.com/media/media3">Media3 (ExoPlayer)</a>, with its HLS and RTSP modules</li>
   <li>A <a href="https://github.com/Gathin23/cleanyourtv/blob/main/docs/modules.md">module card</a> for the <a href="https://github.com/Gathin23/cleanyourtv">Clean Your TV</a> launcher ("Corner Player", orange glow); on any other home it's an ordinary app</li>
 </ul>
@@ -102,10 +103,51 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
   <tr><td><strong>Cameras</strong></td><td>Your cameras by name; OK plays one. <strong>Add a camera</strong> asks for a name and an <code>rtsp://</code> or <code>http(s)://</code> address; <strong>Remove cameras</strong> (OK twice) removes them all.</td></tr>
   <tr><td><strong>Channels</strong></td><td>The channels of your playlist; OK plays one. <strong>Playlist address</strong> is an M3U playlist.</td></tr>
   <tr><td><strong>Inputs</strong></td><td>The TV's HDMI (and other) inputs, by the names the TV shows; OK plays one. Boxes and sticks have none.</td></tr>
+  <tr><td><strong>Network control</strong></td><td>Off (default) or On. On, it shows this TV's address and the token your automations send; <strong>New token</strong> (OK twice) replaces it.</td></tr>
   <tr><td><strong>Corner</strong></td><td>Bottom right (default), bottom left, top left, top right.</td></tr>
   <tr><td><strong>Size</strong></td><td>25, 33 (default) or 40 % of the screen's width, 16:9.</td></tr>
   <tr><td><strong>Sound</strong></td><td>Off (default) or On.</td></tr>
 </table>
+
+<h3>Network control</h3>
+
+<p>Switch on <strong>Network control</strong> and Corner Player listens on port 8765 for requests from your home network: a doorbell press shows the front door, Home Assistant shows the nursery when it hears crying. The automation stays in your home server; the TV only opens and closes the window. Every request carries the token shown on the TV (or pushed as <code>"token"</code> in <code>config.json</code>, with <code>"remote": true</code>).</p>
+
+<table>
+  <tr><th>Request</th><th>What it does</th></tr>
+  <tr><td><code>POST /play</code> with <code>name=</code></td><td>Opens a camera or input by its name (any case), for example <code>name=Front door</code> or <code>name=HDMI2</code>.</td></tr>
+  <tr><td><code>POST /play</code> with <code>url=</code></td><td>Opens any <code>rtsp://</code> or <code>http(s)://</code> stream; <code>title=</code> is the name it shows.</td></tr>
+  <tr><td><code>seconds=</code></td><td>With either: the window closes by itself after that long (up to 3600). Without it, it stays up until stopped.</td></tr>
+  <tr><td><code>POST /stop</code></td><td>Closes the window.</td></tr>
+  <tr><td><code>GET /status</code></td><td><code>{"playing": "Front door"}</code>, or <code>null</code>.</td></tr>
+</table>
+
+<p>Parameters go in the query, a form body or a JSON body. Replies are JSON: <code>{"ok": true, "playing": ...}</code> or <code>{"error": ...}</code> with status 400, 401 (no or wrong token), 404 (no such camera or input) or 409 (the window isn't allowed).</p>
+
+<pre>
+curl -X POST -H "Authorization: Bearer &lt;token&gt;" \
+  -d "name=Front door" -d seconds=60 http://&lt;tv ip&gt;:8765/play
+</pre>
+
+<p>In Home Assistant, a <code>rest_command</code> (keep the token in <code>secrets.yaml</code>):</p>
+
+<pre>
+rest_command:
+  tv_corner_play:
+    url: "http://&lt;tv ip&gt;:8765/play"
+    method: post
+    headers:
+      Authorization: !secret corner_player_auth   # "Bearer &lt;token&gt;"
+    content_type: "application/json"
+    payload: '{"name": "{{ name }}", "seconds": {{ seconds | default(60) }}}'
+  tv_corner_stop:
+    url: "http://&lt;tv ip&gt;:8765/stop"
+    method: post
+    headers:
+      Authorization: !secret corner_player_auth
+</pre>
+
+<p>Then an automation calls <code>rest_command.tv_corner_play</code> with <code>name: Front door</code> when the doorbell rings. Give the TV a fixed address in your router so automations keep finding it.</p>
 
 <h2>How It Works</h2>
 
@@ -116,6 +158,7 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
   <tr><td><code>INTERNET</code></td><td>The cameras and playlist you add, and nothing else.</td></tr>
   <tr><td>Display over other apps (<code>SYSTEM_ALERT_WINDOW</code>)</td><td>To draw the corner window over other apps. It never takes focus or the remote's keys. Granted by <code>install.sh</code>, since many TVs hide the setting.</td></tr>
   <tr><td>Foreground service (<code>FOREGROUND_SERVICE</code>, <code>FOREGROUND_SERVICE_MEDIA_PLAYBACK</code>)</td><td>One service plays the stream while the window is up, and stops with it.</td></tr>
+  <tr><td><code>FOREGROUND_SERVICE_SPECIAL_USE</code>, <code>RECEIVE_BOOT_COMPLETED</code>, <code>ACCESS_NETWORK_STATE</code></td><td>Network control only, while it's on: a second service listens for your automations and comes back after a restart; the TV's address is shown on screen.</td></tr>
 </table>
 
 <p>Plain <code>http://</code> and <code>rtsp://</code> are allowed for the home network (<code>res/xml/network.xml</code>). <code>ConfigProvider</code> takes a pushed file and only the ADB shell can use it (it requires <code>WRITE_SECURE_SETTINGS</code>). More in <a href="SECURITY.md">SECURITY.md</a>.</p>
@@ -127,12 +170,13 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
   <li><strong>Protected video</strong> (some streaming apps' DRM) may refuse to play while another window shows video, depending on the chip.</li>
   <li><strong>A pointer can't click through the window.</strong> Since Android 12 an overlay that lets touches through is drawn at most 80 % opaque, which would show what's underneath the video, so the corner window keeps touches. TVs have no touchscreen; with an air mouse, that one corner can't be clicked through.</li>
   <li><strong>HDMI is up to the TV.</strong> Corner Player shows the inputs the TV lists for apps; some makers list none, or refuse a second app. Most TVs can show only one HDMI input at a time, so an HDMI input in the corner over another HDMI input (or over the TV's own tuner) usually won't work; over an app it should. With nothing on the input, the window says "No picture" and waits. An input's window has square corners and no shadow: many TV chips show a black window otherwise. Its name stays on it until the TV reports a picture, so on a black window, a name that stays means the TV sends no picture, and a name that fades means the TV says it does (please <a href="../../issues">open an issue</a> with the TV's model). On some chips (Realtek) a screenshot shows the HDMI picture's place wrongly; the TV itself shows it in the corner.</li>
+  <li><strong>Network control is plain HTTP</strong> on your home network: the token keeps others on the network out, but anyone who can read your network traffic can read it too. Never forward port 8765 to the internet; from away, use a VPN to your home network. Playlist channels can't be opened by name yet; use <code>url=</code>.</li>
   <li><strong>A stream that fails</strong> is retried once; then the window says it can't play and closes after a few seconds.</li>
 </ul>
 
 <h2>Tested On</h2>
 
-<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. HDMI inputs (added for <a href="../../issues/1">#1</a>, v0.2.0): the same TV lists AV and HDMI1 to HDMI3; HDMI1 and HDMI2 opened in the bottom-right corner over Home with nothing plugged in, saying "No picture on HDMI1", and Stop let go of the input. A picture from a plugged-in device was not tried yet. The JVM tests cover the playlist reader, addresses and inputs, hiding camera passwords and the window's place.</p>
+<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. HDMI inputs (added for <a href="../../issues/1">#1</a>, v0.2.0): the same TV lists AV and HDMI1 to HDMI3; HDMI1 and HDMI2 opened in the bottom-right corner over Home with nothing plugged in, saying "No picture on HDMI1", and Stop let go of the input. A picture from a plugged-in device was not tried yet. Network control (added for <a href="../../issues/3">#3</a>) builds and its request parsing and token checks pass the tests, but it was not tried on a TV yet. The JVM tests cover the playlist reader, addresses and inputs, hiding camera passwords, the window's place, and network control's requests and token.</p>
 
 <h2>Origin</h2>
 

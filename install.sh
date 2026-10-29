@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build Corner Player, install it on the TV, allow its corner window and, optionally, push cameras and a playlist.
-#   TV_HOST=<tv ip> ./install.sh [config.json]   # {"cameras": [{"name": ..., "url": "rtsp://..."}], "playlist": "http://..."}
+#   TV_HOST=<tv ip> ./install.sh [config.json]   # {"cameras": [{"name": ..., "url": "rtsp://..."}], "playlist": "http://...", "remote": true, "token": "..."}
 #   TV_HOST=<tv ip> APK=CornerPlayer-0.1.0.apk ./install.sh [config.json]   # a release APK instead of building
 # Uses adb. Where macOS blocks the stock adb, set CLEANYOURTV to a clone of github.com/Gathin23/cleanyourtv with
 # its tools set up (tools/venv), and its tools/tv.py is used instead.

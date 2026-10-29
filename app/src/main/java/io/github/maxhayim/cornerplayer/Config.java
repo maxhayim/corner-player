@@ -9,11 +9,13 @@ import org.json.JSONObject;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.security.SecureRandom;
 import java.util.List;
 
 /**
- * Cameras, the playlist address and the window's settings, in the app's own storage (backups are off). Cameras
- * and the playlist arrive typed on the TV or as config.json pushed by install.sh, read once and deleted.
+ * Cameras, the playlist address, the window's settings and network control, in the app's own storage (backups are
+ * off). Cameras, the playlist and the network token arrive typed on the TV or as config.json pushed by install.sh,
+ * read once and deleted.
  */
 final class Config {
     static final String PUSHED = "config.json";
@@ -58,7 +60,31 @@ final class Config {
         return of(c).getBoolean("sound", false);
     }
 
-    /** Takes a pushed config.json ({"cameras": [{"name", "url"}], "playlist": url}), and deletes it. */
+    /** Network control: off unless switched on, on the TV or in a pushed config.json. */
+    static boolean remote(Context c) {
+        return of(c).getBoolean("remote", false);
+    }
+
+    static void setRemote(Context c, boolean on) {
+        of(c).edit().putBoolean("remote", on).apply();
+    }
+
+    /** The token requests must carry; made the first time it's needed. */
+    static String token(Context c) {
+        String t = of(c).getString("token", "");
+        return Corner.validToken(t) ? t : newToken(c);
+    }
+
+    static String newToken(Context c) {
+        String t = Corner.newToken(new SecureRandom());
+        of(c).edit().putString("token", t).apply();
+        return t;
+    }
+
+    /**
+     * Takes a pushed config.json ({"cameras": [{"name", "url"}], "playlist": url, "remote": true, "token": ...}),
+     * and deletes it.
+     */
     static boolean importPushed(Context c) {
         File dir = c.getExternalFilesDir(null);
         File f = dir == null ? null : new File(dir, PUSHED);
@@ -68,6 +94,9 @@ final class Config {
             JSONArray cams = o.optJSONArray("cameras");
             if (cams != null) saveCameras(c, Corner.cameras(cams.toString()));
             if (o.has("playlist")) savePlaylist(c, o.optString("playlist"));
+            if (o.has("remote")) setRemote(c, o.optBoolean("remote"));
+            String token = o.optString("token", "");
+            if (Corner.validToken(token)) of(c).edit().putString("token", token).apply();
             return true;
         } catch (Exception e) {
             return false;

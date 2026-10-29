@@ -3,13 +3,20 @@ package io.github.maxhayim.cornerplayer;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Random;
 
 /**
  * Sources, playlists and the window's place, with no Android types, so the JVM tests cover them: reading an M3U
- * playlist, checking stream addresses, hiding camera passwords on screen, and where the corner window goes.
+ * playlist, checking stream addresses, hiding camera passwords on screen, where the corner window goes, and the
+ * network control's requests and token.
  */
 final class Corner {
     /** A playlist larger than this is cut off, so a big IPTV list can't make the screen slow. */
@@ -17,6 +24,11 @@ final class Corner {
     static final int MAX_CAMERAS = 20;
     /** Window widths, in percent of the screen's. */
     static final int[] SIZES = {25, 33, 40};
+    /** Network control: how long a source opened from the network may stay up before it closes by itself. */
+    static final int MAX_SECONDS = 3600;
+    /** Token letters: lowercase and digits, without the ones that look alike on a TV (0/o, 1/l/i). */
+    private static final String TOKEN_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789";
+    static final int TOKEN_LENGTH = 24;
     /** A TV input (HDMI and the like) travels as "input:" and its id, like an address; never sent to a network. */
     static final String INPUT = "input:";
 
@@ -127,6 +139,57 @@ final class Corner {
                     .append(",\"url\":").append(JSONObject.quote(cams.get(i).url)).append('}');
         }
         return b.append(']').toString();
+    }
+
+    /** The source with this name, ignoring case and spaces around it; null if there is none. */
+    static Source find(List<Source> sources, String name) {
+        if (name == null || name.trim().isEmpty()) return null;
+        for (Source s : sources) if (s.name.trim().equalsIgnoreCase(name.trim())) return s;
+        return null;
+    }
+
+    /** Parameters of a query string or form body: a=1&b=two%20words. Later keys win; bad escapes are skipped. */
+    static Map<String, String> query(String text) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (text == null || text.isEmpty()) return out;
+        for (String pair : text.split("&")) {
+            int eq = pair.indexOf('=');
+            String k = eq < 0 ? pair : pair.substring(0, eq);
+            String v = eq < 0 ? "" : pair.substring(eq + 1);
+            try {
+                out.put(URLDecoder.decode(k, StandardCharsets.UTF_8.name()), URLDecoder.decode(v, StandardCharsets.UTF_8.name()));
+            } catch (Exception ignored) {
+                // Not decodable: left out.
+            }
+        }
+        return out;
+    }
+
+    /** Seconds before a source opened from the network closes: 0 (stays up) to MAX_SECONDS. */
+    static int seconds(String text) {
+        try {
+            return Math.max(0, Math.min(MAX_SECONDS, Integer.parseInt(text == null ? "0" : text.trim())));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    static String newToken(Random random) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < TOKEN_LENGTH; i++) b.append(TOKEN_LETTERS.charAt(random.nextInt(TOKEN_LETTERS.length())));
+        return b.toString();
+    }
+
+    /** A token pushed in config.json: long enough, and only letters and digits, so it can sit in a header. */
+    static boolean validToken(String token) {
+        return token != null && token.length() >= 16 && token.length() <= 128 && token.matches("[A-Za-z0-9]+");
+    }
+
+    /** Whether an Authorization header carries the token, compared in constant time. */
+    static boolean authorized(String token, String header) {
+        if (!validToken(token) || header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) return false;
+        return MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8),
+                header.substring(7).trim().getBytes(StandardCharsets.UTF_8));
     }
 
     static String placeName(Place p) {

@@ -11,6 +11,7 @@ import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
 import android.media.tv.TvContract;
+import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.media.tv.TvView;
 import android.os.Build;
@@ -28,6 +29,9 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
@@ -41,7 +45,7 @@ import androidx.media3.exoplayer.ExoPlayer;
 public class CornerService extends Service {
     static final String TAG = "CornerPlayer";
     private static final String CHANNEL = "corner";
-    private static final String EXTRA_NAME = "name", EXTRA_URL = "url";
+    private static final String EXTRA_NAME = "name", EXTRA_URL = "url", EXTRA_SECONDS = "seconds";
     private static final String ACTION_STOP = "stop", ACTION_LAYOUT = "layout";
     /** A stream that fails is retried once, then the window says so and closes. */
     private static final long CLOSE_AFTER_ERROR_MS = 8000;
@@ -60,7 +64,13 @@ public class CornerService extends Service {
     private boolean retried;
 
     static void play(Context c, String name, String url) {
-        c.startForegroundService(new Intent(c, CornerService.class).putExtra(EXTRA_NAME, name).putExtra(EXTRA_URL, url));
+        play(c, name, url, 0);
+    }
+
+    /** With seconds above 0, the window closes by itself after that long (a doorbell, say). */
+    static void play(Context c, String name, String url, int seconds) {
+        c.startForegroundService(new Intent(c, CornerService.class).putExtra(EXTRA_NAME, name).putExtra(EXTRA_URL, url)
+                .putExtra(EXTRA_SECONDS, seconds));
     }
 
     static void stop(Context c) {
@@ -74,6 +84,26 @@ public class CornerService extends Service {
 
     static boolean canDraw(Context c) {
         return Settings.canDrawOverlays(c);
+    }
+
+    /** The TV's own inputs (HDMI and the like) by the names the TV gives them; none on a box or stick. */
+    static List<Corner.Source> inputs(Context c) {
+        List<Corner.Source> out = new ArrayList<>();
+        TvInputManager tim = c.getSystemService(TvInputManager.class);
+        if (tim == null) return out;
+        try {
+            for (TvInputInfo i : tim.getTvInputList()) {
+                if (!i.isPassthroughInput() || i.isHidden(c)) continue;
+                CharSequence label = i.loadCustomLabel(c);
+                if (label == null || label.length() == 0) label = i.loadLabel(c);
+                out.add(new Corner.Source(label.toString(), Corner.inputUrl(i.getId()), false));
+            }
+        } catch (RuntimeException e) {
+            // The TV's input service is missing or broken: no inputs.
+        }
+        // The TV lists them in no order: HDMI1, HDMI2, ... by name.
+        out.sort((x, y) -> x.name.compareToIgnoreCase(y.name));
+        return out;
     }
 
     @Override
@@ -111,6 +141,8 @@ public class CornerService extends Service {
             return START_NOT_STICKY;
         }
         show(name == null ? Corner.shown(url) : name, url);
+        int seconds = Corner.seconds(String.valueOf(intent.getIntExtra(EXTRA_SECONDS, 0)));
+        if (seconds > 0) main.postDelayed(this::stopSelf, seconds * 1000L);
         return START_NOT_STICKY;
     }
 

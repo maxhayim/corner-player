@@ -40,7 +40,20 @@ Responsible disclosure is required.
 - Corner Player connects only to the addresses you give it: no telemetry, no update checks, no ads.
 - Plain `http://` and `rtsp://` are allowed so home cameras work. On a network you don't trust, RTSP streams and
   their passwords can be read in transit; use the camera's encrypted options where it has them.
-- Never forward cameras or ADB (port 5555) to the internet. To watch from away, use a VPN to your home network.
+- Never forward cameras, ADB (port 5555) or network control (port 8765) to the internet. To watch from away, use a
+  VPN to your home network.
+
+---
+
+## Network Control
+
+- Off by default. Only when you switch it on does Corner Player listen, on port 8765, and it keeps listening after a
+  restart until you switch it off.
+- Every request needs the token shown on the TV, sent as `Authorization: Bearer <token>`; it is compared in constant
+  time, and requests are answered one at a time. **New token** replaces it.
+- It can open your cameras and inputs by name, or a stream address it is given, and close the window; nothing else.
+  It never returns camera addresses.
+- It is plain HTTP: anyone who can read your network's traffic can read the token. Keep it on a network you trust.
 
 ---
 
