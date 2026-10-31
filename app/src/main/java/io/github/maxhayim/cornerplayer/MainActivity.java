@@ -21,12 +21,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.net.Inet4Address;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -38,8 +33,6 @@ import java.util.concurrent.Executors;
  * switch or stop. The window's corner, size and sound are set here too.
  */
 public class MainActivity extends Activity {
-    private static final int MAX_PLAYLIST_BYTES = 4 * 1024 * 1024;
-
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService net = Executors.newSingleThreadExecutor();
     private LinearLayout rows;
@@ -96,37 +89,12 @@ public class MainActivity extends Activity {
         String url = Config.playlist(this);
         if (url.isEmpty() || url.equals(channelsFrom)) return;
         net.execute(() -> {
-            List<Corner.Source> found = null;
-            String why = null;
-            HttpURLConnection c = null;
-            try {
-                c = (HttpURLConnection) new URL(url).openConnection();
-                c.setConnectTimeout(6000);
-                c.setReadTimeout(10000);
-                int code = c.getResponseCode();
-                if (code / 100 != 2) {
-                    why = "The playlist address answered with error " + code + ".";
-                } else {
-                    try (InputStream in = c.getInputStream()) {
-                        ByteArrayOutputStream out = new ByteArrayOutputStream();
-                        byte[] buf = new byte[16384];
-                        for (int n; (n = in.read(buf)) > 0 && out.size() < MAX_PLAYLIST_BYTES; ) out.write(buf, 0, n);
-                        found = Corner.parseM3u(out.toString(StandardCharsets.UTF_8.name()));
-                        if (found.isEmpty()) why = "No channels in that playlist.";
-                    }
-                }
-            } catch (Exception e) {
-                why = "Can't read the playlist at that address.";
-            } finally {
-                if (c != null) c.disconnect();
-            }
-            List<Corner.Source> f = found;
-            String w = why;
+            Net.Playlist p = Net.playlist(url);
             main.post(() -> {
                 if (isFinishing()) return;
                 channelsFrom = url;
-                channels = f == null ? new ArrayList<>() : f;
-                playlistProblem = w;
+                channels = p.channels;
+                playlistProblem = p.problem;
                 build();
             });
         });
@@ -137,7 +105,9 @@ public class MainActivity extends Activity {
         int focused = rows.indexOfChild(rows.getFocusedChild());
         rows.removeAllViews();
         String now = CornerService.playing;
-        status.setText(now != null ? "In the corner: " + now + "." : "Nothing in the corner. OK on a camera, channel or input plays it.");
+        status.setText(now == null ? "Nothing in the corner. OK on a camera, channel or input plays it."
+                : CornerService.cycling ? "In the corner: the cameras in turn, now " + now + "."
+                : "In the corner: " + now + ".");
         Row first = null;
         if (now != null) {
             first = add(new Row(this, "Stop", "Closes the corner window.", false, () -> {
@@ -177,6 +147,21 @@ public class MainActivity extends Activity {
                 build();
             }, null));
             rm.setValue(removeArmed ? "OK again: remove all" : cams.size() + "");
+        }
+        if (cams.size() >= 2) {
+            Row cy = add(new Row(this, "Cycle cameras", "Each camera in turn, like a security monitor. ◀ ▶ sets how long each shows.",
+                    false, () -> {
+                        if (!CornerService.canDraw(this)) {
+                            askOverlay();
+                            return;
+                        }
+                        CornerService.cycle(this);
+                        moveTaskToBack(true);
+                    }, d -> {
+                        Config.of(this).edit().putInt("cycle", Corner.nextCycle(Config.cycle(this), d)).apply();
+                        build();
+                    }));
+            cy.setValue((CornerService.cycling ? "Cycling, " : "") + Config.cycle(this) + " s each");
         }
 
         heading("Channels");
@@ -237,6 +222,12 @@ public class MainActivity extends Activity {
             build();
         }, null));
         sound.setValue(Config.sound(this) ? "On" : "Off");
+        Row reopen = add(new Row(this, "Reopen after restart", "What was in the corner comes back when the TV starts.",
+                false, () -> {
+                    Config.of(this).edit().putBoolean("reopen", !Config.reopen(this)).apply();
+                    build();
+                }, null));
+        reopen.setValue(Config.reopen(this) ? "On" : "Off");
 
         heading("Network control");
         boolean remote = Config.remote(this);

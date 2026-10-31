@@ -141,6 +141,91 @@ public class CornerTest {
     }
 
     @Test
+    public void windowOptionsFromTheNetwork() {
+        assertEquals(Corner.Place.TOP_LEFT, Corner.parsePlace("top-left"));
+        assertEquals(Corner.Place.BOTTOM_RIGHT, Corner.parsePlace("Bottom_Right"));
+        assertEquals(Corner.Place.TOP_RIGHT, Corner.parsePlace("topright"));
+        assertNull(Corner.parsePlace("middle"));
+        assertNull(Corner.parsePlace(null));
+        assertEquals(40, Corner.parseSize("40"));
+        assertEquals(50, Corner.parseSize("50%"));
+        assertEquals(-1, Corner.parseSize("90"));
+        assertEquals(-1, Corner.parseSize("big"));
+        assertEquals(Boolean.TRUE, Corner.parseSound("ON"));
+        assertEquals(Boolean.FALSE, Corner.parseSound("0"));
+        assertNull(Corner.parseSound("loud"));
+    }
+
+    @Test
+    public void requestsSurviveARestart() {
+        Corner.Request r = new Corner.Request("Nursery", "rtsp://u:p@192.168.1.41/s", 0, Corner.Place.TOP_LEFT, 40, true);
+        Corner.Request back = Corner.Request.fromJson(r.toJson());
+        assertEquals("Nursery", back.name);
+        assertEquals("rtsp://u:p@192.168.1.41/s", back.url);
+        assertEquals(Corner.Place.TOP_LEFT, back.place);
+        assertEquals(40, back.size);
+        assertEquals(Boolean.TRUE, back.sound);
+        Corner.Request plain = Corner.Request.fromJson(r.plain().toJson());
+        assertNull(plain.place);
+        assertEquals(0, plain.size);
+        assertNull(plain.sound);
+        assertEquals(10, Corner.Request.fromJson(new Corner.Request(null, null, 10, null, 0, null).toJson()).cycle);
+        assertNull("nothing to play", Corner.Request.fromJson("{\"url\":\"ftp://x\"}"));
+        assertNull(Corner.Request.fromJson("not json"));
+    }
+
+    @Test
+    public void cycleSteps() {
+        assertEquals(20, Corner.nextCycle(10, 1));
+        assertEquals(5, Corner.nextCycle(10, -1));
+        assertEquals(5, Corner.nextCycle(5, -1));
+        assertEquals(60, Corner.nextCycle(60, 1));
+        assertEquals(10, Corner.nextCycle(7, 1));
+    }
+
+    @Test
+    public void picturesAreToldFromVideo() {
+        assertTrue(Corner.surelyVideo("rtsp://192.168.1.40/s"));
+        assertTrue(Corner.surelyVideo("http://h/live/news.m3u8?token=1"));
+        assertFalse(Corner.surelyVideo("http://192.168.1.40/snapshot.jpg"));
+        assertFalse(Corner.surelyVideo("http://192.168.1.40/video.cgi"));
+        assertEquals(Corner.Kind.STILL, Corner.kind("image/jpeg"));
+        assertEquals(Corner.Kind.MJPEG, Corner.kind("multipart/x-mixed-replace; boundary=frame"));
+        assertEquals(Corner.Kind.VIDEO, Corner.kind("application/vnd.apple.mpegurl"));
+        assertEquals(Corner.Kind.VIDEO, Corner.kind(null));
+    }
+
+    @Test
+    public void mjpegFramesAreFound() {
+        byte[] a = {(byte) 0xFF, (byte) 0xD8, 1, 2, (byte) 0xFF, (byte) 0xD9};
+        byte[] b = {(byte) 0xFF, (byte) 0xD8, 3, (byte) 0xFF, 0, (byte) 0xFF, (byte) 0xD9};
+        byte[] head = "--frame\r\nContent-Type: image/jpeg\r\n\r\n".getBytes();
+        java.io.ByteArrayOutputStream s = new java.io.ByteArrayOutputStream();
+        s.write(head, 0, head.length);
+        s.write(a, 0, a.length);
+        s.write(head, 0, head.length);
+        s.write(b, 0, b.length);
+        byte[] all = s.toByteArray();
+        Corner.Jpegs j = new Corner.Jpegs();
+        // Split mid-picture: the second picture arrives in two reads.
+        int cut = all.length - 3;
+        List<byte[]> first = j.feed(all, cut);
+        List<byte[]> rest = j.feed(Arrays.copyOfRange(all, cut, all.length), all.length - cut);
+        assertEquals(1, first.size());
+        assertArrayEquals(a, first.get(0));
+        assertEquals(1, rest.size());
+        assertArrayEquals(b, rest.get(0));
+    }
+
+    @Test
+    public void passwordsGoInAHeaderNotTheAddress() {
+        assertEquals("admin:p@ss word", Corner.userInfo("http://admin:p%40ss%20word@192.168.1.40/snap.jpg"));
+        assertEquals("http://192.168.1.40/snap.jpg", Corner.withoutUserInfo("http://admin:p%40ss%20word@192.168.1.40/snap.jpg"));
+        assertNull(Corner.userInfo("http://192.168.1.40/snap.jpg"));
+        assertEquals("http://192.168.1.40/a@b", Corner.withoutUserInfo("http://192.168.1.40/a@b"));
+    }
+
+    @Test
     public void sizesCycle() {
         assertEquals(33, Corner.nextSize(25));
         assertEquals(40, Corner.nextSize(33));

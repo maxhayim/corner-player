@@ -60,6 +60,26 @@ final class Config {
         return of(c).getBoolean("sound", false);
     }
 
+    /** Seconds per camera when cycling. */
+    static int cycle(Context c) {
+        return of(c).getInt("cycle", Corner.CYCLE_STEPS[1]);
+    }
+
+    /** Off by default: after a restart the corner stays closed unless this is on. */
+    static boolean reopen(Context c) {
+        return of(c).getBoolean("reopen", false);
+    }
+
+    /** What was in the corner (not a short one from the network), to reopen after a restart; null if nothing. */
+    static Corner.Request last(Context c) {
+        String json = of(c).getString("last", "");
+        return json.isEmpty() ? null : Corner.Request.fromJson(json);
+    }
+
+    static void saveLast(Context c, Corner.Request r) {
+        of(c).edit().putString("last", r == null ? "" : r.toJson()).apply();
+    }
+
     /** Network control: off unless switched on, on the TV or in a pushed config.json. */
     static boolean remote(Context c) {
         return of(c).getBoolean("remote", false);

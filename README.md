@@ -39,6 +39,9 @@
   <li><strong>Your playlist</strong>: the channels of an M3U playlist you point it at</li>
   <li><strong>HDMI inputs</strong>: on a TV with HDMI inputs, any of them (a game console, a set-top box, a camera's HDMI out) by the name the TV gives it</li>
   <li><strong>Network control</strong>: Home Assistant, a doorbell or any device on your network opens a camera or input in the corner with an HTTP request, for as long as you like, and closes it; off unless you switch it on, and every request needs the TV's token</li>
+  <li><strong>Snapshot and MJPEG cameras</strong>: a camera address that answers with a picture is refreshed every second, and an MJPEG stream is shown picture by picture; neither needs a video decoder, so they play even where a second video can't</li>
+  <li><strong>Cycle cameras</strong>: every camera in turn, 5 to 60 seconds each, like a security monitor</li>
+  <li><strong>Reopen after restart</strong>: optionally, what was in the corner comes back when the TV starts</li>
   <li><strong>Any corner, three sizes</strong>: bottom right (default), bottom left, top left, top right; 25, 33 (default) or 40 % of the screen's width, 16:9</li>
   <li><strong>Hands off the remote</strong>: the window never takes focus or keys; the app below keeps working</li>
   <li><strong>Silent by default</strong>: sound off unless you switch it on</li>
@@ -100,13 +103,14 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
 <table>
   <tr><th>Row</th><th>What it does</th></tr>
   <tr><td><strong>Stop</strong></td><td>Closes the corner window (shown while one plays, focused first).</td></tr>
-  <tr><td><strong>Cameras</strong></td><td>Your cameras by name; OK plays one. <strong>Add a camera</strong> asks for a name and an <code>rtsp://</code> or <code>http(s)://</code> address; <strong>Remove cameras</strong> (OK twice) removes them all.</td></tr>
+  <tr><td><strong>Cameras</strong></td><td>Your cameras by name; OK plays one. <strong>Add a camera</strong> asks for a name and an <code>rtsp://</code> or <code>http(s)://</code> address; <strong>Remove cameras</strong> (OK twice) removes them all. With two or more, <strong>Cycle cameras</strong> shows each in turn; ◀ ▶ sets 5 to 60 seconds each. A camera address can also be its snapshot (a picture) or MJPEG address.</td></tr>
   <tr><td><strong>Channels</strong></td><td>The channels of your playlist; OK plays one. <strong>Playlist address</strong> is an M3U playlist.</td></tr>
   <tr><td><strong>Inputs</strong></td><td>The TV's HDMI (and other) inputs, by the names the TV shows; OK plays one. Boxes and sticks have none.</td></tr>
   <tr><td><strong>Network control</strong></td><td>Off (default) or On. On, it shows this TV's address and the token your automations send; <strong>New token</strong> (OK twice) replaces it.</td></tr>
   <tr><td><strong>Corner</strong></td><td>Bottom right (default), bottom left, top left, top right.</td></tr>
   <tr><td><strong>Size</strong></td><td>25, 33 (default) or 40 % of the screen's width, 16:9.</td></tr>
   <tr><td><strong>Sound</strong></td><td>Off (default) or On.</td></tr>
+  <tr><td><strong>Reopen after restart</strong></td><td>Off (default) or On: what was in the corner (not a short one from the network) comes back when the TV starts. Stop forgets it.</td></tr>
 </table>
 
 <h3>Network control</h3>
@@ -115,11 +119,13 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
 
 <table>
   <tr><th>Request</th><th>What it does</th></tr>
-  <tr><td><code>POST /play</code> with <code>name=</code></td><td>Opens a camera or input by its name (any case), for example <code>name=Front door</code> or <code>name=HDMI2</code>.</td></tr>
+  <tr><td><code>POST /play</code> with <code>name=</code></td><td>Opens a camera, input or playlist channel by its name (any case), for example <code>name=Front door</code> or <code>name=HDMI2</code>.</td></tr>
   <tr><td><code>POST /play</code> with <code>url=</code></td><td>Opens any <code>rtsp://</code> or <code>http(s)://</code> stream; <code>title=</code> is the name it shows.</td></tr>
-  <tr><td><code>seconds=</code></td><td>With either: the window closes by itself after that long (up to 3600). Without it, it stays up until stopped.</td></tr>
+  <tr><td><code>POST /play</code> with <code>cycle=</code></td><td>Shows every camera in turn, that many seconds each.</td></tr>
+  <tr><td><code>seconds=</code></td><td>With any of them: it ends by itself after that long (up to 3600), and the corner goes back to what was in it before, or closes if it was empty. A doorbell over the baby monitor, then the baby monitor again. Without it, it stays up until stopped.</td></tr>
+  <tr><td><code>corner=</code>, <code>size=</code>, <code>sound=</code></td><td>With any of them: this window only, for example <code>corner=top-left</code>, <code>size=50</code> (15 to 60 % of the screen's width), <code>sound=on</code>. Without them, the app's settings.</td></tr>
   <tr><td><code>POST /stop</code></td><td>Closes the window.</td></tr>
-  <tr><td><code>GET /status</code></td><td><code>{"playing": "Front door"}</code>, or <code>null</code>.</td></tr>
+  <tr><td><code>GET /status</code></td><td><code>{"playing": "Front door", "cycling": false}</code>; <code>playing</code> is <code>null</code> when the corner is closed.</td></tr>
 </table>
 
 <p>Parameters go in the query, a form body or a JSON body. Replies are JSON: <code>{"ok": true, "playing": ...}</code> or <code>{"error": ...}</code> with status 400, 401 (no or wrong token), 404 (no such camera or input) or 409 (the window isn't allowed).</p>
@@ -166,17 +172,18 @@ rest_command:
 <h2>Known Limitations</h2>
 
 <ul>
-  <li><strong>Two videos at once need two decoders.</strong> The corner and the app below each decode a video. Many TV chips have two decoders; some don't, or share them badly: on one test TV a second stream next to YouTube made YouTube stall. Prefer a camera's sub-stream, and check with what you watch.</li>
+  <li><strong>Two videos at once need two decoders.</strong> The corner and the app below each decode a video. Many TV chips have two decoders; some don't, or share them badly: on one test TV a second stream next to YouTube made YouTube stall. Prefer a camera's sub-stream, or its snapshot or MJPEG address, which needs no decoder, and check with what you watch.</li>
   <li><strong>Protected video</strong> (some streaming apps' DRM) may refuse to play while another window shows video, depending on the chip.</li>
   <li><strong>A pointer can't click through the window.</strong> Since Android 12 an overlay that lets touches through is drawn at most 80 % opaque, which would show what's underneath the video, so the corner window keeps touches. TVs have no touchscreen; with an air mouse, that one corner can't be clicked through.</li>
   <li><strong>HDMI is up to the TV.</strong> Corner Player shows the inputs the TV lists for apps; some makers list none, or refuse a second app. Most TVs can show only one HDMI input at a time, so an HDMI input in the corner over another HDMI input (or over the TV's own tuner) usually won't work; over an app it should. With nothing on the input, the window says "No picture" and waits. An input's window has square corners and no shadow: many TV chips show a black window otherwise. Its name stays on it until the TV reports a picture, so on a black window, a name that stays means the TV sends no picture, and a name that fades means the TV says it does (please <a href="../../issues">open an issue</a> with the TV's model). On some chips (Realtek) a screenshot shows the HDMI picture's place wrongly; the TV itself shows it in the corner.</li>
-  <li><strong>Network control is plain HTTP</strong> on your home network: the token keeps others on the network out, but anyone who can read your network traffic can read it too. Never forward port 8765 to the internet; from away, use a VPN to your home network. Playlist channels can't be opened by name yet; use <code>url=</code>.</li>
+  <li><strong>Network control is plain HTTP</strong> on your home network: the token keeps others on the network out, but anyone who can read your network traffic can read it too. Never forward port 8765 to the internet; from away, use a VPN to your home network.</li>
+  <li><strong>Snapshot cameras</strong> are asked for a new picture every second, and a user name and password in their address are sent as Basic authentication; cameras that only take Digest authentication for snapshots won't send one.</li>
   <li><strong>A stream that fails</strong> is retried once; then the window says it can't play and closes after a few seconds.</li>
 </ul>
 
 <h2>Tested On</h2>
 
-<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. HDMI inputs (added for <a href="../../issues/1">#1</a>, v0.2.0): the same TV lists AV and HDMI1 to HDMI3; HDMI1 and HDMI2 opened in the bottom-right corner over Home with nothing plugged in, saying "No picture on HDMI1", and Stop let go of the input. A picture from a plugged-in device was not tried yet. Network control (added for <a href="../../issues/3">#3</a>, v0.3.0), on the same TV with Corner Player in the background over Home: requests without or with a wrong token refused (401), unknown names, bad addresses, paths and methods answered with their errors; <code>POST /play</code> opened HDMI1 (JSON body, <code>seconds=8</code>, closed by itself) and HDMI2 (form body), <code>/status</code> followed, <code>/stop</code> closed it; it was listening again after an in-place update, and switching it off closed the port. Restarting the TV was not tried. The JVM tests cover the playlist reader, addresses and inputs, hiding camera passwords, the window's place, and network control's requests and token.</p>
+<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. HDMI inputs (added for <a href="../../issues/1">#1</a>, v0.2.0): the same TV lists AV and HDMI1 to HDMI3; HDMI1 and HDMI2 opened in the bottom-right corner over Home with nothing plugged in, saying "No picture on HDMI1", and Stop let go of the input. A picture from a plugged-in device was not tried yet. v0.4.0's snapshot and MJPEG cameras, cycling, per-window corner, size and sound, the corner going back after a short one, channels by name over the network and Reopen after restart build and pass the tests, but were not tried on a TV yet. Network control (added for <a href="../../issues/3">#3</a>, v0.3.0), on the same TV with Corner Player in the background over Home: requests without or with a wrong token refused (401), unknown names, bad addresses, paths and methods answered with their errors; <code>POST /play</code> opened HDMI1 (JSON body, <code>seconds=8</code>, closed by itself) and HDMI2 (form body), <code>/status</code> followed, <code>/stop</code> closed it; it was listening again after an in-place update, and switching it off closed the port. Restarting the TV was not tried. The JVM tests cover the playlist reader, addresses and inputs, hiding camera passwords, the window's place, and network control's requests and token.</p>
 
 <h2>Origin</h2>
 

@@ -31,8 +31,11 @@ import java.util.Map;
  * TV. Runs only while it's on, and comes back after a restart.
  *
  * <pre>
- * POST /play    name=Front door [seconds=60]   a camera or input by name
+ * POST /play    name=Front door                a camera, input or playlist channel by name
  *               url=rtsp://... [title=Door]    or any stream address
+ *               cycle=10                       or every camera in turn, 10 seconds each
+ *               [seconds=60]                   closes by itself, giving the corner back to what was there
+ *               [corner=top-left] [size=40] [sound=on]   this window only
  * POST /stop
  * GET  /status
  * </pre>
@@ -158,7 +161,8 @@ public class RemoteService extends Service {
         params.putAll(body(in, length));
 
         if (path.equals("/status") && method.equals("GET")) {
-            reply(out, 200, "{\"playing\":" + (CornerService.playing == null ? "null" : JSONObject.quote(CornerService.playing)) + "}");
+            reply(out, 200, "{\"playing\":" + (CornerService.playing == null ? "null" : JSONObject.quote(CornerService.playing))
+                    + ",\"cycling\":" + CornerService.cycling + "}");
         } else if (path.equals("/stop") && method.equals("POST")) {
             CornerService.stop(this);
             reply(out, 200, "{\"ok\":true}");
@@ -172,9 +176,39 @@ public class RemoteService extends Service {
     }
 
     private void play(OutputStream out, Map<String, String> params) throws IOException {
+        Corner.Place place = null;
+        String corner = params.get("corner");
+        if (corner != null && (place = Corner.parsePlace(corner)) == null) {
+            reply(out, 400, error("corner must be bottom-right, bottom-left, top-left or top-right."));
+            return;
+        }
+        int size = 0;
+        if (params.get("size") != null && (size = Corner.parseSize(params.get("size"))) < 0) {
+            reply(out, 400, error("size must be " + Corner.MIN_SIZE + " to " + Corner.MAX_SIZE + " (percent of the screen's width)."));
+            return;
+        }
+        Boolean sound = null;
+        if (params.get("sound") != null && (sound = Corner.parseSound(params.get("sound"))) == null) {
+            reply(out, 400, error("sound must be on or off."));
+            return;
+        }
+        int cycle = 0;
+        if (params.get("cycle") != null) {
+            cycle = Corner.seconds(params.get("cycle"));
+            if (cycle <= 0) {
+                reply(out, 400, error("cycle must be the seconds each camera shows, for example cycle=10."));
+                return;
+            }
+            if (Config.cameras(this).isEmpty()) {
+                reply(out, 404, error("No cameras to cycle through."));
+                return;
+            }
+        }
         Corner.Source s;
         String url = params.get("url");
-        if (url != null && !url.trim().isEmpty()) {
+        if (cycle > 0) {
+            s = new Corner.Source("Cameras", null, false);
+        } else if (url != null && !url.trim().isEmpty()) {
             if (!Corner.validUrl(url.trim())) {
                 reply(out, 400, error("url must be an rtsp://, http:// or https:// address."));
                 return;
@@ -186,8 +220,11 @@ public class RemoteService extends Service {
             String name = params.get("name");
             s = Corner.find(Config.cameras(this), name);
             if (s == null) s = Corner.find(CornerService.inputs(this), name);
+            String playlist = Config.playlist(this);
+            if (s == null && name != null && !playlist.isEmpty()) s = Corner.find(Net.playlist(playlist).channels, name);
             if (s == null) {
-                reply(out, 404, error(name == null ? "Give a name (a camera or input) or a url." : "No camera or input named " + name + "."));
+                reply(out, 404, error(name == null ? "Give a name (a camera, input or channel), a url or cycle."
+                        : "No camera, input or channel named " + name + "."));
                 return;
             }
         }
@@ -196,14 +233,15 @@ public class RemoteService extends Service {
             return;
         }
         try {
-            CornerService.play(this, s.name, s.url, Corner.seconds(params.get("seconds")));
+            CornerService.start(this, new Corner.Request(cycle > 0 ? null : s.name, s.url, cycle, place, size, sound),
+                    Corner.seconds(params.get("seconds")));
         } catch (RuntimeException e) {
             // Android may refuse to start the window's service from the background.
             Log.w(CornerService.TAG, "network control can't open the window: " + e);
             reply(out, 409, error("This TV won't let Corner Player open the window from the background."));
             return;
         }
-        reply(out, 200, "{\"ok\":true,\"playing\":" + JSONObject.quote(s.name) + "}");
+        reply(out, 200, "{\"ok\":true,\"playing\":" + (cycle > 0 ? "null,\"cycling\":true" : JSONObject.quote(s.name)) + "}");
     }
 
     /** A Content-Length; anything unreadable counts as too large. */

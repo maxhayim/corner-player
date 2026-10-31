@@ -3,6 +3,8 @@ package io.github.maxhayim.cornerplayer;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -15,8 +17,9 @@ import java.util.Random;
 
 /**
  * Sources, playlists and the window's place, with no Android types, so the JVM tests cover them: reading an M3U
- * playlist, checking stream addresses, hiding camera passwords on screen, where the corner window goes, and the
- * network control's requests and token.
+ * playlist, checking stream addresses, hiding camera passwords on screen, where the corner window goes, the
+ * network control's requests and token, what to play with its own window settings, and pictures from cameras that
+ * send stills or MJPEG.
  */
 final class Corner {
     /** A playlist larger than this is cut off, so a big IPTV list can't make the screen slow. */
@@ -24,6 +27,12 @@ final class Corner {
     static final int MAX_CAMERAS = 20;
     /** Window widths, in percent of the screen's. */
     static final int[] SIZES = {25, 33, 40};
+    /** A width asked for from the network, in percent: anything in this range, not only SIZES. */
+    static final int MIN_SIZE = 15, MAX_SIZE = 60;
+    /** Seconds per camera when cycling. */
+    static final int[] CYCLE_STEPS = {5, 10, 20, 30, 60};
+    /** One picture from a camera, still or MJPEG frame: anything larger is dropped. */
+    static final int MAX_PICTURE_BYTES = 8 * 1024 * 1024;
     /** Network control: how long a source opened from the network may stay up before it closes by itself. */
     static final int MAX_SECONDS = 3600;
     /** Token letters: lowercase and digits, without the ones that look alike on a TV (0/o, 1/l/i). */
@@ -43,6 +52,104 @@ final class Corner {
             this.name = name;
             this.url = url;
             this.camera = camera;
+        }
+    }
+
+    /**
+     * What to play and how: a source (or every camera in turn, every cycle seconds), with the window settings this
+     * one asked for. Null settings follow the app's. Kept as JSON to reopen it after a restart.
+     */
+    static final class Request {
+        final String name;
+        final String url;
+        /** Above 0: every camera in turn, this many seconds each; name and url are then unused. */
+        final int cycle;
+        final Place place;
+        /** Width in percent; 0 follows the app. */
+        final int size;
+        final Boolean sound;
+
+        Request(String name, String url, int cycle, Place place, int size, Boolean sound) {
+            this.name = name;
+            this.url = url;
+            this.cycle = cycle;
+            this.place = place;
+            this.size = size;
+            this.sound = sound;
+        }
+
+        /** The same, following the app's corner, size and sound. */
+        Request plain() {
+            return new Request(name, url, cycle, null, 0, null);
+        }
+
+        String toJson() {
+            JSONObject o = new JSONObject();
+            try {
+                if (name != null) o.put("name", name);
+                if (url != null) o.put("url", url);
+                if (cycle > 0) o.put("cycle", cycle);
+                if (place != null) o.put("corner", place.name());
+                if (size > 0) o.put("size", size);
+                if (sound != null) o.put("sound", sound);
+            } catch (Exception ignored) {
+                // Plain values only.
+            }
+            return o.toString();
+        }
+
+        /** Null for anything that can't be played. */
+        static Request fromJson(String json) {
+            try {
+                JSONObject o = new JSONObject(json);
+                int cycle = Math.max(0, o.optInt("cycle", 0));
+                String url = o.optString("url", null);
+                if (cycle == 0 && !validUrl(url) && !isInput(url)) return null;
+                int size = o.optInt("size", 0);
+                return new Request(o.optString("name", null), url, cycle, parsePlace(o.optString("corner", null)),
+                        size >= MIN_SIZE && size <= MAX_SIZE ? size : 0,
+                        o.has("sound") ? o.optBoolean("sound") : null);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * MJPEG: the JPEG pictures in a camera's multipart stream, found by their start and end markers rather than the
+     * part headers, which cameras write in many ways.
+     */
+    static final class Jpegs {
+        private final ByteArrayOutputStream frame = new ByteArrayOutputStream();
+        private boolean inFrame;
+        private int last = -1;
+
+        /** The pictures completed by these bytes. */
+        List<byte[]> feed(byte[] b, int n) {
+            List<byte[]> out = new ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                int x = b[i] & 0xFF;
+                if (!inFrame) {
+                    if (last == 0xFF && x == 0xD8) {
+                        inFrame = true;
+                        frame.reset();
+                        frame.write(0xFF);
+                        frame.write(0xD8);
+                    }
+                } else {
+                    frame.write(x);
+                    if (last == 0xFF && x == 0xD9) {
+                        out.add(frame.toByteArray());
+                        inFrame = false;
+                        frame.reset();
+                    } else if (frame.size() > MAX_PICTURE_BYTES) {
+                        inFrame = false;
+                        frame.reset();
+                    }
+                }
+                last = x;
+            }
+            return out;
         }
     }
 
@@ -190,6 +297,88 @@ final class Corner {
         if (!validToken(token) || header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) return false;
         return MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8),
                 header.substring(7).trim().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** bottom-right, bottom_right, BottomRight and the like; null for anything else. */
+    static Place parsePlace(String text) {
+        if (text == null) return null;
+        String t = text.trim().toLowerCase(Locale.ROOT).replace("-", "").replace("_", "").replace(" ", "");
+        for (Place p : Place.values()) if (p.name().toLowerCase(Locale.ROOT).replace("_", "").equals(t)) return p;
+        return null;
+    }
+
+    /** A width in percent, MIN_SIZE to MAX_SIZE; -1 for anything else. */
+    static int parseSize(String text) {
+        try {
+            int n = Integer.parseInt(text.trim().replace("%", ""));
+            return n >= MIN_SIZE && n <= MAX_SIZE ? n : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** on/off, true/false, 1/0, yes/no; null for anything else. */
+    static Boolean parseSound(String text) {
+        if (text == null) return null;
+        switch (text.trim().toLowerCase(Locale.ROOT)) {
+            case "on": case "true": case "1": case "yes": return true;
+            case "off": case "false": case "0": case "no": return false;
+            default: return null;
+        }
+    }
+
+    static int nextCycle(int current, int direction) {
+        for (int i = 0; i < CYCLE_STEPS.length; i++) {
+            if (CYCLE_STEPS[i] == current) {
+                return CYCLE_STEPS[Math.max(0, Math.min(CYCLE_STEPS.length - 1, i + direction))];
+            }
+        }
+        return CYCLE_STEPS[1];
+    }
+
+    /** Whether an address is surely video by its scheme or ending, so it needs no look at what it sends first. */
+    static boolean surelyVideo(String url) {
+        if (url == null) return false;
+        String u = url.toLowerCase(Locale.ROOT);
+        if (u.startsWith("rtsp")) return true;
+        int q = u.indexOf('?');
+        if (q >= 0) u = u.substring(0, q);
+        for (String end : new String[]{".m3u8", ".m3u", ".mpd", ".ts", ".mp4", ".m4v", ".mkv", ".webm", ".mov"}) {
+            if (u.endsWith(end)) return true;
+        }
+        return false;
+    }
+
+    enum Kind { VIDEO, STILL, MJPEG }
+
+    /** What an http(s) answer is, by its Content-Type: a picture to refresh, an MJPEG stream, or video. */
+    static Kind kind(String contentType) {
+        if (contentType == null) return Kind.VIDEO;
+        String t = contentType.trim().toLowerCase(Locale.ROOT);
+        if (t.startsWith("image/")) return Kind.STILL;
+        if (t.startsWith("multipart/x-mixed-replace")) return Kind.MJPEG;
+        return Kind.VIDEO;
+    }
+
+    /** The user name and password in an address ("user:password", unescaped), or null. */
+    static String userInfo(String url) {
+        try {
+            String u = new URI(url.trim()).getUserInfo();
+            return u == null || u.isEmpty() ? null : u;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** The address without its user name and password, which go in a header instead. */
+    static String withoutUserInfo(String url) {
+        if (url == null) return null;
+        int s = url.indexOf("://");
+        if (s < 0) return url;
+        int slash = url.indexOf('/', s + 3);
+        int end = slash < 0 ? url.length() : slash;
+        int at = url.lastIndexOf('@', end - 1);
+        return at > s ? url.substring(0, s + 3) + url.substring(at + 1) : url;
     }
 
     static String placeName(Place p) {
