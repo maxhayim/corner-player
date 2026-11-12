@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
@@ -51,6 +52,7 @@ import java.util.Locale;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.VideoSize;
 import androidx.media3.exoplayer.ExoPlayer;
 
 /**
@@ -76,7 +78,7 @@ public class CornerService extends Service {
     /** Stills: this many failures in a row and the window says it can't play. */
     private static final int STILL_FAILURES = 3;
     /** Over a picture the banner lets a little through; alone, as a card, it hides what's under it. */
-    private static final int BANNER = 0xD90D1117, CARD = 0xFF0D1117, ACCENT = 0xFFFF9F43;
+    private static final int CARD = 0xFF0D1117, ACCENT = 0xFFFF9F43;
 
     /** What plays now, for the app's screen and network control; null when nothing does. */
     static volatile String playing;
@@ -368,7 +370,13 @@ public class CornerService extends Service {
         int pad = Math.round(Math.max(8 * dp, w * 0.03f));
         int vpad = card ? pad * 3 / 2 : pad;
         b.setPadding(pad, vpad, pad, vpad);
-        if (!card) b.setBackgroundColor(BANNER);
+        if (!card) {
+            // Drawn over the bottom of the picture: a fade to dark, so the text reads on any picture and the
+            // picture still fills the whole popup.
+            b.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+                    new int[]{0xE6000000, 0x99000000, 0x00000000}));
+            b.setPadding(pad, pad * 3, pad, pad);
+        }
 
         int icon = Math.round(Math.max(28 * dp, w * (card ? 0.13f : 0.09f)));
         ImageView bell = new ImageView(this);
@@ -411,6 +419,7 @@ public class CornerService extends Service {
         t.setTextColor(color);
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.setShadowLayer(4f, 0f, 1f, 0xCC000000);
         return t;
     }
 
@@ -459,6 +468,28 @@ public class CornerService extends Service {
         }, "chime").start();
     }
 
+    /** Whether the window holds a doorbell popup now: its picture fills the popup, under the banner. */
+    private boolean bellNow() {
+        Corner.Request r = slot.now;
+        return r != null && r.bell != null;
+    }
+
+    /**
+     * Crops a stream to fill its view, centred, the way a doorbell's picture fills its popup. A TextureView
+     * stretches what it shows to its own size, so this scales it back to the video's shape, enlarged to cover.
+     */
+    private void fill(TextureView v, float vw, float vh) {
+        int w = v.getWidth(), h = v.getHeight();
+        if (w == 0 || h == 0) {
+            if (v.isAttachedToWindow()) v.post(() -> fill(v, vw, vh));
+            return;
+        }
+        float scale = Math.max(w / vw, h / vh);
+        Matrix m = new Matrix();
+        m.setScale(vw * scale / w, vh * scale / h, w / 2f, h / 2f);
+        v.setTransform(m);
+    }
+
     private void showStream(String name, String url) {
         TextureView video = new TextureView(this);
         screen.addView(video, new FrameLayout.LayoutParams(-1, -1));
@@ -469,6 +500,12 @@ public class CornerService extends Service {
             @Override
             public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_READY) setShowing("video");
+            }
+
+            @Override
+            public void onVideoSizeChanged(VideoSize size) {
+                if (bellNow() && size.width > 0 && size.height > 0)
+                    fill(video, size.width * size.pixelWidthHeightRatio, size.height);
             }
 
             @Override
@@ -512,7 +549,7 @@ public class CornerService extends Service {
                 main.post(() -> {
                     if (gen != generation) return;
                     picture = new ImageView(this);
-                    picture.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    picture.setScaleType(bellNow() ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
                     screen.addView(picture, new FrameLayout.LayoutParams(-1, -1));
                     setShowing(kind == Corner.Kind.MJPEG ? "mjpeg" : "snapshot");
                 });
