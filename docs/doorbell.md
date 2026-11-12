@@ -6,7 +6,7 @@ name, "Someone is at the door", the time, and the door camera's picture when one
 keeps playing and keeps the remote.
 
 <p align="center">
-  <img src="../assets/doorbell-popup.png" alt="The doorbell popup in the top-right corner of a TV's home screen: the door camera's picture fills it, with Front Door, Someone is at the door, 11:16 AM and LIVE over the bottom of the picture" width="720"/>
+  <img src="../assets/doorbell-popup.png" alt="The doorbell popup in the bottom-right corner of a TV's home screen, where the video window plays: the door camera's picture fills it, with Front Door, Someone is at the door, 11:59 AM and LIVE over the bottom of the picture" width="720"/>
 </p>
 <p align="center"><sub>On a MOKA R8G over its home screen. The door camera is a test picture served as an MJPEG feed from a computer on the same network. App banners belong to their owners.</sub></p>
 
