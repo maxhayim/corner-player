@@ -23,7 +23,9 @@ import android.widget.TextView;
 
 import java.net.Inet4Address;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -106,6 +108,7 @@ public class MainActivity extends Activity {
         rows.removeAllViews();
         String now = CornerService.playing;
         status.setText(now == null ? "Nothing in the corner. OK on a camera, channel or input plays it."
+                : CornerService.doorbell != null ? "In the corner: the doorbell popup for " + CornerService.doorbell + "."
                 : CornerService.cycling ? "In the corner: the cameras in turn, now " + now + "."
                 : "In the corner: " + now + ".");
         Row first = null;
@@ -229,6 +232,8 @@ public class MainActivity extends Activity {
                 }, null));
         reopen.setValue(Config.reopen(this) ? "On" : "Off");
 
+        doorbellRows(cams);
+
         heading("Network control");
         boolean remote = Config.remote(this);
         Row on = add(new Row(this, "Network control", "Home Assistant, a doorbell or any device on your network opens a"
@@ -241,7 +246,7 @@ public class MainActivity extends Activity {
         if (remote) {
             String problem = RemoteService.problem;
             add(new Row(this, "Address", problem != null ? problem
-                    : "POST /play with name=a camera or input, or url=; POST /stop; GET /status.", false, null, null))
+                    : "POST /play with name=a camera or input, or url=; POST /doorbell; POST /stop; GET /status.", false, null, null))
                     .setValue(address());
             add(new Row(this, "Token", "Sent as the header Authorization: Bearer and the token.", false, null, null))
                     .setValue(Config.token(this));
@@ -266,6 +271,90 @@ public class MainActivity extends Activity {
         if (keep != null && keep.isFocusable()) keep.requestFocus();
         else if (first != null) first.requestFocus();
         else place.requestFocus();
+    }
+
+    private interface BellChange {
+        void change(Corner.Bell b);
+    }
+
+    /** Changes one Doorbell setting, saves it and shows it. */
+    private Runnable bellSet(BellChange change) {
+        return () -> {
+            Corner.Bell b = Config.bell(this);
+            change.change(b);
+            Config.saveBell(this, b);
+            build();
+        };
+    }
+
+    /** ◀ ▶ on Duration (seconds) or Motion cooldown. */
+    private Row.Step bellStep(int[] steps, boolean seconds) {
+        return d -> {
+            Corner.Bell b = Config.bell(this);
+            if (seconds) b.seconds = Corner.step(steps, b.seconds, d);
+            else b.cooldown = Corner.step(steps, b.cooldown, d);
+            Config.saveBell(this, b);
+            build();
+        };
+    }
+
+    /**
+     * What a doorbell event from the network shows: on or off, which camera, where, how long, a chime, rings only or
+     * motion too, and a test popup that needs no doorbell.
+     */
+    private void doorbellRows(List<Corner.Source> cams) {
+        heading("Doorbell");
+        Corner.Bell bell = Config.bell(this);
+        add(new Row(this, "Doorbell popups", "A ring (from Home Assistant or another automation, with network control"
+                + " on) shows who's at the door in a corner, then gives the corner back.", false,
+                bellSet(b -> b.on = !b.on), null)).setValue(bell.on ? "On" : "Off");
+        if (!bell.on) return;
+        add(new Row(this, "Camera", "Shown with the banner when a request names none. OK picks the next.", false,
+                bellSet(b -> {
+                    // None, then each camera in turn.
+                    int at = -1;
+                    for (int i = 0; i < cams.size(); i++) if (cams.get(i).name.equalsIgnoreCase(b.camera)) at = i;
+                    b.camera = at + 1 < cams.size() ? cams.get(at + 1).name : "";
+                }), null)).setValue(bell.camera.isEmpty() ? "None" : bell.camera);
+        add(new Row(this, "Show", "Camera: its picture with the banner over it. Notification only: the banner alone.",
+                false, bellSet(b -> b.video = !b.video), null)).setValue(bell.video ? "Camera" : "Notification only");
+        add(new Row(this, "Popup corner", null, false, bellSet(b ->
+                b.place = Corner.Place.values()[(b.place.ordinal() + 1) % Corner.Place.values().length]), null))
+                .setValue(Corner.placeName(bell.place));
+        add(new Row(this, "Popup size", "Width, as a share of the screen.", false,
+                bellSet(b -> b.size = Corner.nextSize(b.size)), null)).setValue(bell.size + " %");
+        add(new Row(this, "Duration", "How long the popup stays. ◀ ▶ or OK.", false,
+                bellSet(b -> b.seconds = Corner.next(Corner.BELL_SECONDS, b.seconds)),
+                bellStep(Corner.BELL_SECONDS, true))).setValue(bell.seconds + " s");
+        add(new Row(this, "Chime", "A short chime as it pops up, at the TV's notification volume.", false,
+                bellSet(b -> b.chime = !b.chime), null)).setValue(bell.chime ? "On" : "Off");
+        add(new Row(this, "Triggers", "Motion too, if your automation sends motion events.", false,
+                bellSet(b -> b.motion = !b.motion), null)).setValue(bell.motion ? "Ring and motion" : "Ring only");
+        if (bell.motion) {
+            add(new Row(this, "Motion cooldown", "At most one motion popup this often. ◀ ▶ or OK.", false,
+                    bellSet(b -> b.cooldown = Corner.next(Corner.COOLDOWNS, b.cooldown)),
+                    bellStep(Corner.COOLDOWNS, false))).setValue(bell.cooldown == 0 ? "None" : bell.cooldown + " s");
+        }
+        add(new Row(this, "Restore previous", "When the popup ends, what was in the corner comes back. Off: it closes.",
+                false, bellSet(b -> b.restore = !b.restore), null)).setValue(bell.restore ? "On" : "Off");
+        add(new Row(this, "Test doorbell popup", "Shows the popup now, as a ring would. No doorbell needed.", false,
+                this::testDoorbell, null));
+    }
+
+    private void testDoorbell() {
+        if (!CornerService.canDraw(this)) {
+            askOverlay();
+            return;
+        }
+        Corner.Bell b = Config.bell(this);
+        Map<String, String> p = new HashMap<>();
+        p.put("event", "test");
+        p.put("device", b.camera.isEmpty() ? "Front Door" : b.camera);
+        List<Corner.Source> sources = new ArrayList<>(Config.cameras(this));
+        sources.addAll(CornerService.inputs(this));
+        Corner.Ring ring = Corner.Ring.parse(p, b, sources);
+        CornerService.ring(this, ring.request(System.currentTimeMillis()), ring.seconds, b.restore, ring.chime);
+        moveTaskToBack(true);
     }
 
     /** This TV's address on the home network, for the network control's requests. */

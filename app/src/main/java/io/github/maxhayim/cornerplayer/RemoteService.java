@@ -20,8 +20,10 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -36,6 +38,9 @@ import java.util.Map;
  *               cycle=10                       or every camera in turn, 10 seconds each
  *               [seconds=60]                   closes by itself, giving the corner back to what was there
  *               [corner=top-left] [size=40] [sound=on]   this window only
+ * POST /doorbell event=ring|motion|test|dismiss  a doorbell popup: banner with the doorbell's name over its camera
+ *               [device=Front Door] [camera=Front door | url=...] [seconds=45] [corner=] [size=] [sound=on]
+ *               [audio=on] [video=off] [cooldown=60]
  * POST /stop
  * GET  /status
  * </pre>
@@ -158,21 +163,100 @@ public class RemoteService extends Service {
         int q = target.indexOf('?');
         String path = q < 0 ? target : target.substring(0, q);
         Map<String, String> params = Corner.query(q < 0 ? "" : target.substring(q + 1));
-        params.putAll(body(in, length));
+        Map<String, String> body = body(in, length);
+        if (body != null) params.putAll(body);
 
         if (path.equals("/status") && method.equals("GET")) {
-            reply(out, 200, "{\"playing\":" + (CornerService.playing == null ? "null" : JSONObject.quote(CornerService.playing))
-                    + ",\"cycling\":" + CornerService.cycling + "}");
+            reply(out, 200, "{\"playing\":" + quote(CornerService.playing) + ",\"cycling\":" + CornerService.cycling
+                    + ",\"doorbell\":" + quote(CornerService.doorbell) + ",\"showing\":" + quote(CornerService.showing) + "}");
         } else if (path.equals("/stop") && method.equals("POST")) {
+            gate.dismissed();
             CornerService.stop(this);
             reply(out, 200, "{\"ok\":true}");
         } else if (path.equals("/play") && method.equals("POST")) {
             play(out, params);
-        } else if (path.equals("/status") || path.equals("/stop") || path.equals("/play")) {
-            reply(out, 405, error("Use GET /status, POST /play or POST /stop."));
+        } else if (path.equals("/doorbell") && method.equals("POST")) {
+            if (body == null) {
+                reply(out, 400, error("The body must be JSON or a form."));
+                return;
+            }
+            doorbell(out, params);
+        } else if (path.equals("/status") || path.equals("/stop") || path.equals("/play") || path.equals("/doorbell")) {
+            reply(out, 405, error(USE));
         } else {
-            reply(out, 404, error("Use GET /status, POST /play or POST /stop."));
+            reply(out, 404, error(USE));
         }
+    }
+
+    private static final String USE = "Use GET /status, POST /play, POST /doorbell or POST /stop.";
+
+    /** Which doorbell events become a popup; requests come one at a time, on one thread. */
+    private final Corner.Gate gate = new Corner.Gate();
+
+    /**
+     * A doorbell event: a popup with the doorbell's name over its camera (or alone), for the Doorbell settings'
+     * time, then the corner goes back to what was in it. The camera is the url given (kept in memory only, never
+     * saved), the camera named, or the Doorbell settings' camera.
+     */
+    private void doorbell(OutputStream out, Map<String, String> params) throws IOException {
+        Corner.Bell bell = Config.bell(this);
+        List<Corner.Source> sources = new ArrayList<>(Config.cameras(this));
+        sources.addAll(CornerService.inputs(this));
+        Corner.Ring ring = Corner.Ring.parse(params, bell, sources);
+        if (ring.error != null) {
+            reply(out, 400, error(ring.error));
+            return;
+        }
+        if (ring.event == Corner.Event.DISMISS) {
+            gate.dismissed();
+            if (CornerService.doorbell != null) CornerService.dismiss(this);
+            reply(out, 200, "{\"ok\":true}");
+            return;
+        }
+
+        // The event is good: from here on, a reason not to show is an answer, not an error.
+        if (!bell.on) {
+            reply(out, 200, notShown("Doorbell popups are off on the TV."));
+            return;
+        }
+        String why = gate.check(ring.event, System.currentTimeMillis(), ring.seconds, ring.cooldown, bell.motion);
+        if (why != null) {
+            reply(out, 200, notShown(why));
+            return;
+        }
+        android.os.PowerManager pm = getSystemService(android.os.PowerManager.class);
+        if (pm != null && !pm.isInteractive()) {
+            // A TV in standby is never woken up: nobody would see it, and the screen stays off.
+            gate.dismissed();
+            reply(out, 200, notShown("The TV's screen is off."));
+            return;
+        }
+        if (!CornerService.canDraw(this)) {
+            gate.dismissed();
+            reply(out, 409, error("Display over other apps isn't allowed for Corner Player."));
+            return;
+        }
+
+        try {
+            CornerService.ring(this, ring.request(System.currentTimeMillis()), ring.seconds, bell.restore, ring.chime);
+        } catch (RuntimeException e) {
+            gate.dismissed();
+            Log.w(CornerService.TAG, "network control can't open the doorbell popup: " + e.getClass().getSimpleName());
+            reply(out, 409, error("This TV won't let Corner Player open the window from the background."));
+            return;
+        }
+        StringBuilder b = new StringBuilder("{\"ok\":true,\"shown\":true,\"doorbell\":").append(JSONObject.quote(ring.device))
+                .append(",\"source\":\"").append(ring.sourceKind()).append("\",\"seconds\":").append(ring.seconds);
+        if (ring.warning != null) b.append(",\"warning\":").append(JSONObject.quote(ring.warning));
+        reply(out, 200, b.append('}').toString());
+    }
+
+    private static String notShown(String why) {
+        return "{\"ok\":true,\"shown\":false,\"reason\":" + JSONObject.quote(why) + "}";
+    }
+
+    private static String quote(String s) {
+        return s == null ? "null" : JSONObject.quote(s);
     }
 
     private void play(OutputStream out, Map<String, String> params) throws IOException {
@@ -268,11 +352,15 @@ public class RemoteService extends Service {
         return null;
     }
 
-    /** A form body (name=...&seconds=...) or a JSON one ({"name": ..., "seconds": 60}). */
+    /**
+     * A form body (name=...&seconds=...) or a JSON one ({"name": ..., "seconds": 60}); null for JSON that can't be
+     * read, a body cut short, or a JSON value that is an object or list (only plain values are parameters).
+     */
     private static Map<String, String> body(InputStream in, int length) throws IOException {
         byte[] buf = new byte[length];
         int got = 0;
         for (int n; got < length && (n = in.read(buf, got, length - got)) > 0; ) got += n;
+        if (got < length) return null;
         String text = new String(buf, 0, got, StandardCharsets.UTF_8).trim();
         if (!text.startsWith("{")) return Corner.query(text);
         Map<String, String> out = new LinkedHashMap<>();
@@ -280,10 +368,12 @@ public class RemoteService extends Service {
             JSONObject o = new JSONObject(text);
             for (Iterator<String> keys = o.keys(); keys.hasNext(); ) {
                 String k = keys.next();
-                out.put(k, o.optString(k));
+                Object v = o.get(k);
+                if (v instanceof JSONObject || v instanceof org.json.JSONArray) return null;
+                if (v != JSONObject.NULL) out.put(k, String.valueOf(v));
             }
-        } catch (Exception ignored) {
-            // Not JSON: no parameters from the body.
+        } catch (Exception e) {
+            return null;
         }
         return out;
     }

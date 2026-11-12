@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <title>Mockup: Corner Player's doorbell popup in the top-right corner of a TV</title>
+  <defs>
+    <linearGradient id="show" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d3557"/>
+      <stop offset="1" stop-color="#2a9d8f"/>
+    </linearGradient>
+    <linearGradient id="porch" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b6770"/>
+      <stop offset="1" stop-color="#2b3238"/>
+    </linearGradient>
+    <clipPath id="win"><rect x="837" y="21" width="422" height="237" rx="8"/></clipPath>
+  </defs>
+
+  <!-- What's being watched: any app. -->
+  <rect width="1280" height="720" fill="url(#show)"/>
+  <circle cx="300" cy="520" r="220" fill="#ffffff" opacity="0.06"/>
+  <circle cx="520" cy="300" r="140" fill="#ffffff" opacity="0.05"/>
+  <text x="64" y="660" font-family="Helvetica, Arial, sans-serif" font-size="28" fill="#ffffff" opacity="0.55">Whatever you're watching</text>
+
+  <!-- The popup: 33 % of the width, 16:9, top right, 32 px (dp) from the edges at 1920 scale. -->
+  <g clip-path="url(#win)">
+    <rect x="837" y="21" width="422" height="237" fill="url(#porch)"/>
+    <!-- A door and a visitor, drawn as simple shapes. -->
+    <rect x="1010" y="50" width="110" height="200" fill="#3c2f2a"/>
+    <circle cx="1100" cy="150" r="5" fill="#d9b26a"/>
+    <circle cx="935" cy="120" r="30" fill="#9aa5ad"/>
+    <rect x="895" y="152" width="80" height="110" rx="26" fill="#9aa5ad"/>
+    <!-- The banner. -->
+    <rect x="837" y="172" width="422" height="86" fill="#0d1117" opacity="0.85"/>
+    <circle cx="879" cy="215" r="24" fill="#ff9f43"/>
+    <path transform="translate(865 201) scale(1.17)" fill="#0d1117"
+          d="M12,2.5a1.5,1.5 0 0,1 1.5,1.5v0.7c2.9,0.7 4.5,3.2 4.5,6.3v4.5l2,2v1H4v-1l2,-2V11c0,-3.1 1.6,-5.6 4.5,-6.3V4A1.5,1.5 0 0,1 12,2.5z M9.8,19.5h4.4a2.2,2.2 0 0,1 -4.4,0z"/>
+    <text x="917" y="200" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="bold" fill="#ffffff">Front Door</text>
+    <text x="917" y="226" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#e6edf3">Someone is at the door</text>
+    <text x="917" y="248" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#afb8c1">8:42 PM</text>
+    <text x="985" y="248" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#ff9f43">SNAPSHOT</text>
+  </g>
+  <rect x="837" y="21" width="422" height="237" rx="8" fill="none" stroke="#000000" stroke-opacity="0.35"/>
+</svg>

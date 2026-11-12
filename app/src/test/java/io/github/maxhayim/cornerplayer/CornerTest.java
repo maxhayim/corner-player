@@ -225,6 +225,279 @@ public class CornerTest {
         assertEquals("http://192.168.1.40/a@b", Corner.withoutUserInfo("http://192.168.1.40/a@b"));
     }
 
+    // Doorbell
+
+    private static final List<Corner.Source> SOURCES = Arrays.asList(
+            new Corner.Source("Front door", "http://192.168.1.40/snap.jpg", true),
+            new Corner.Source("HDMI2", Corner.inputUrl("hw/HDMI2"), false));
+
+    private static Map<String, String> params(String... kv) {
+        Map<String, String> m = new java.util.HashMap<>();
+        for (int i = 0; i < kv.length; i += 2) m.put(kv[i], kv[i + 1]);
+        return m;
+    }
+
+    @Test
+    public void aValidDoorbellRing() {
+        Corner.Ring r = Corner.Ring.parse(params("event", "ring", "device", "Front Door", "camera", "front door",
+                "seconds", "45", "corner", "top-right", "size", "33", "sound", "false"), new Corner.Bell(), SOURCES);
+        assertNull(r.error);
+        assertEquals(Corner.Event.RING, r.event);
+        assertEquals("Front Door", r.device);
+        assertEquals("Front door", r.source.name);
+        assertEquals("camera", r.sourceKind());
+        assertEquals(45, r.seconds);
+        assertEquals(Corner.Place.TOP_RIGHT, r.place);
+        assertFalse(r.chime);
+        Corner.Request q = r.request(1234);
+        assertEquals("Front Door", q.bell);
+        assertEquals("http://192.168.1.40/snap.jpg", q.url);
+        assertFalse(q.card());
+        assertEquals(1234, q.at);
+    }
+
+    @Test
+    public void aDoorbellFollowsItsSettings() {
+        Corner.Bell b = new Corner.Bell();
+        b.camera = "Front door";
+        b.place = Corner.Place.BOTTOM_LEFT;
+        b.seconds = 15;
+        b.chime = true;
+        Corner.Ring r = Corner.Ring.parse(params(), b, SOURCES);
+        assertNull(r.error);
+        assertEquals("no event is a ring", Corner.Event.RING, r.event);
+        assertEquals("Front door", r.device);
+        assertEquals(Corner.Place.BOTTOM_LEFT, r.place);
+        assertEquals(15, r.seconds);
+        assertTrue(r.chime);
+        assertNull("the camera's sound is off unless asked", r.request(1).sound);
+        b.video = false;
+        assertEquals("notification only", "notification", Corner.Ring.parse(params(), b, SOURCES).sourceKind());
+        assertEquals("an input works as the camera", "HDMI2",
+                Corner.Ring.parse(params("camera", "hdmi2"), new Corner.Bell(), SOURCES).source.name);
+    }
+
+    @Test
+    public void aMissingCameraStillShowsTheBanner() {
+        Corner.Ring r = Corner.Ring.parse(params("camera", "Garage"), new Corner.Bell(), SOURCES);
+        assertNull(r.error);
+        assertNull(r.source);
+        assertEquals("notification", r.sourceKind());
+        assertTrue(r.warning.contains("Garage"));
+        assertEquals("Garage", r.device);
+        Corner.Request q = r.request(1);
+        assertTrue(q.card());
+        Corner.Request back = Corner.Request.fromJson(q.toJson());
+        assertTrue("a banner alone survives its trip through the service", back.card());
+        assertEquals("Garage", back.bell);
+        assertEquals("doorbell with no camera at all", "Doorbell",
+                Corner.Ring.parse(params(), new Corner.Bell(), SOURCES).device);
+    }
+
+    @Test
+    public void malformedDoorbellRequests() {
+        Corner.Bell b = new Corner.Bell();
+        assertTrue(Corner.Ring.parse(params("event", "explode"), b, SOURCES).error.startsWith("event"));
+        assertTrue(Corner.Ring.parse(params("seconds", "soon"), b, SOURCES).error.startsWith("seconds"));
+        assertTrue(Corner.Ring.parse(params("seconds", "2"), b, SOURCES).error.startsWith("seconds"));
+        assertTrue(Corner.Ring.parse(params("seconds", "99999"), b, SOURCES).error.startsWith("seconds"));
+        assertTrue(Corner.Ring.parse(params("corner", "middle"), b, SOURCES).error.startsWith("corner"));
+        assertTrue(Corner.Ring.parse(params("size", "90"), b, SOURCES).error.startsWith("size"));
+        assertTrue(Corner.Ring.parse(params("sound", "loud"), b, SOURCES).error.startsWith("sound"));
+        assertTrue(Corner.Ring.parse(params("video", "maybe"), b, SOURCES).error.startsWith("video"));
+        assertTrue(Corner.Ring.parse(params("cooldown", "-1"), b, SOURCES).error.startsWith("cooldown"));
+        assertTrue(Corner.Ring.parse(params("url", "file:///sdcard/x.jpg"), b, SOURCES).error.startsWith("url"));
+        assertTrue(Corner.Ring.parse(params("device", new String(new char[300]).replace('\0', 'x')), b, SOURCES)
+                .error.startsWith("device"));
+    }
+
+    @Test
+    public void aDoorbellUrlMayNotPointAtTheTvItself() {
+        assertTrue(Corner.selfOrLinkLocal("http://127.0.0.1:8765/stop"));
+        assertTrue(Corner.selfOrLinkLocal("http://localhost:5555/"));
+        assertTrue(Corner.selfOrLinkLocal("http://[::1]/x"));
+        assertTrue(Corner.selfOrLinkLocal("http://169.254.169.254/latest"));
+        assertTrue(Corner.selfOrLinkLocal("http://0.0.0.0/"));
+        assertTrue(Corner.selfOrLinkLocal("not a url"));
+        assertFalse(Corner.selfOrLinkLocal("http://192.168.1.10:8123/api/camera_proxy/camera.front_door?token=abc"));
+        assertFalse(Corner.selfOrLinkLocal("rtsp://u:p@cam.lan:554/s"));
+        Corner.Ring r = Corner.Ring.parse(params("url", "http://127.0.0.1:8765/stop"), new Corner.Bell(), SOURCES);
+        assertTrue(r.error.startsWith("url"));
+        Corner.Ring ok = Corner.Ring.parse(params("url", "http://192.168.1.10:8123/api/camera_proxy/camera.front_door?token=abc",
+                "device", "Front Door"), new Corner.Bell(), SOURCES);
+        assertNull(ok.error);
+        assertEquals("url", ok.sourceKind());
+        assertEquals("the address's host, never its token, is its name", "http://192.168.1.10:8123", ok.source.name);
+    }
+
+    @Test
+    public void doorbellNamesAreCleaned() {
+        assertEquals("Front Door", Corner.label("  Front\n\tDoor \u0007", "x"));
+        assertEquals("x", Corner.label("   ", "x"));
+        assertEquals("x", Corner.label(null, "x"));
+        String longName = Corner.label("A very long doorbell name that goes on and on and on", "x");
+        assertTrue(longName.length() <= Corner.MAX_LABEL);
+        assertTrue(longName.startsWith("A very long doorbell name"));
+        assertTrue(longName.endsWith("…"));
+    }
+
+    @Test
+    public void doorbellEvents() {
+        assertEquals(Corner.Event.RING, Corner.parseEvent("ding"));
+        assertEquals(Corner.Event.RING, Corner.parseEvent(" Ring "));
+        assertEquals(Corner.Event.RING, Corner.parseEvent(null));
+        assertEquals(Corner.Event.MOTION, Corner.parseEvent("motion"));
+        assertEquals(Corner.Event.TEST, Corner.parseEvent("test"));
+        assertEquals(Corner.Event.DISMISS, Corner.parseEvent("clear"));
+        assertNull(Corner.parseEvent("knock"));
+    }
+
+    @Test
+    public void repeatedRingsAndMotionCooldown() {
+        Corner.Gate g = new Corner.Gate();
+        long t = 1_000_000;
+        assertNull("first ring shows", g.check(Corner.Event.RING, t, 45, 60, true));
+        assertTrue("same press sent twice: one popup", g.check(Corner.Event.RING, t + 1000, 45, 60, true) != null);
+        assertNull("rung again later: shown again, fresh timer", g.check(Corner.Event.RING, t + 6000, 45, 60, true));
+        assertTrue("no motion over a ring's popup", g.check(Corner.Event.MOTION, t + 20_000, 45, 60, true) != null);
+        assertNull("the ring's popup is over: motion shows", g.check(Corner.Event.MOTION, t + 52_000, 45, 60, true));
+        assertTrue("motion cooldown", g.check(Corner.Event.MOTION, t + 80_000, 45, 60, true) != null);
+        assertNull("cooldown over", g.check(Corner.Event.MOTION, t + 113_000, 45, 60, true));
+        assertTrue("motion off: ring only", g.check(Corner.Event.MOTION, t + 999_000, 45, 60, false) != null);
+        assertNull("a test always shows", g.check(Corner.Event.TEST, t + 113_001, 45, 60, true));
+        assertNull("a ring right after motion shows", g.check(Corner.Event.RING, t + 113_002, 45, 60, true));
+        g.dismissed();
+        assertNull("dismissed: motion may show again", g.check(Corner.Event.MOTION, t + 200_000, 45, 0, true));
+    }
+
+    @Test
+    public void theCornerComesBackAfterADoorbell() {
+        Corner.Request nursery = new Corner.Request("Nursery", "rtsp://192.168.1.41/s", 0, null, 0, null);
+        Corner.Request bell = Corner.Ring.parse(params("camera", "Front door"), new Corner.Bell(), SOURCES).request(1);
+        Corner.Slot s = new Corner.Slot();
+        s.open(nursery, false, true);
+        s.open(bell, true, true);
+        assertTrue(s.isShort());
+        assertEquals(bell, s.now);
+        assertEquals("timer over: the nursery again", nursery, s.end());
+        assertEquals(nursery, s.now);
+        assertFalse(s.isShort());
+    }
+
+    @Test
+    public void competingShortOnesKeepTheFirstWayBack() {
+        Corner.Request nursery = new Corner.Request("Nursery", "rtsp://192.168.1.41/s", 0, null, 0, null);
+        Corner.Request shortPlay = new Corner.Request("Garage", "rtsp://192.168.1.42/s", 0, null, 0, null);
+        Corner.Request bell = Corner.Ring.parse(params(), new Corner.Bell(), SOURCES).request(1);
+        Corner.Slot s = new Corner.Slot();
+        s.open(nursery, false, true);
+        s.open(shortPlay, true, true);
+        s.open(bell, true, true);
+        s.open(bell, true, true);
+        assertEquals("never back to the garage or the first ring", nursery, s.end());
+        assertNull("nothing short now: nothing more to end to", s.end());
+    }
+
+    @Test
+    public void aDoorbellOverAnEmptyCornerCloses() {
+        Corner.Slot s = new Corner.Slot();
+        s.open(Corner.Ring.parse(params(), new Corner.Bell(), SOURCES).request(1), true, true);
+        assertNull(s.end());
+    }
+
+    @Test
+    public void restoreOffClosesTheCorner() {
+        Corner.Slot s = new Corner.Slot();
+        s.open(new Corner.Request("Nursery", "rtsp://192.168.1.41/s", 0, null, 0, null), false, true);
+        s.open(Corner.Ring.parse(params(), new Corner.Bell(), SOURCES).request(1), true, false);
+        assertNull(s.end());
+    }
+
+    @Test
+    public void somethingNewReplacesAShortOneForGood() {
+        Corner.Slot s = new Corner.Slot();
+        s.open(new Corner.Request("Nursery", "rtsp://192.168.1.41/s", 0, null, 0, null), false, true);
+        s.open(Corner.Ring.parse(params(), new Corner.Bell(), SOURCES).request(1), true, true);
+        Corner.Request garage = new Corner.Request("Garage", "rtsp://192.168.1.42/s", 0, null, 0, null);
+        s.open(garage, false, true);
+        assertFalse(s.isShort());
+        assertNull("not short: the timer has nothing to end", s.end());
+    }
+
+    @Test
+    public void aCameraThatFailsLeavesTheBannerAndItsWayBack() {
+        Corner.Request nursery = new Corner.Request("Nursery", "rtsp://192.168.1.41/s", 0, null, 0, null);
+        Corner.Request bell = Corner.Ring.parse(params("camera", "Front door", "device", "Front Door"),
+                new Corner.Bell(), SOURCES).request(1);
+        Corner.Slot s = new Corner.Slot();
+        s.open(nursery, false, true);
+        s.open(bell, true, true);
+        // The snapshot address stopped answering (an expired token): the banner alone.
+        s.replace(s.now.cardOnly());
+        assertTrue(s.now.card());
+        assertEquals("Front Door", s.now.bell);
+        assertTrue(s.isShort());
+        assertEquals(nursery, s.end());
+    }
+
+    @Test
+    public void doorbellPopupsKeepTheirOwnPlace() {
+        Corner.Request bell = Corner.Ring.parse(params("corner", "top-left"), new Corner.Bell(), SOURCES).request(1);
+        assertEquals(Corner.Place.TOP_LEFT, bell.plain().place);
+        Corner.Request back = Corner.Request.fromJson(bell.toJson());
+        assertEquals(Corner.Place.TOP_LEFT, back.place);
+        assertEquals(1, back.at);
+        Corner.Request motion = Corner.Ring.parse(params("event", "motion"), new Corner.Bell(), SOURCES).request(1);
+        assertTrue(Corner.Request.fromJson(motion.toJson()).motion);
+    }
+
+    @Test
+    public void doorbellSettingsPersist() {
+        Corner.Bell b = new Corner.Bell();
+        b.on = false;
+        b.camera = "Front door";
+        b.place = Corner.Place.BOTTOM_LEFT;
+        b.size = 40;
+        b.seconds = 120;
+        b.chime = true;
+        b.motion = true;
+        b.cooldown = 300;
+        b.video = false;
+        b.restore = false;
+        Corner.Bell back = Corner.Bell.fromJson(b.toJson());
+        assertFalse(back.on);
+        assertEquals("Front door", back.camera);
+        assertEquals(Corner.Place.BOTTOM_LEFT, back.place);
+        assertEquals(40, back.size);
+        assertEquals(120, back.seconds);
+        assertTrue(back.chime);
+        assertTrue(back.motion);
+        assertEquals(300, back.cooldown);
+        assertFalse(back.video);
+        assertFalse(back.restore);
+        Corner.Bell d = Corner.Bell.fromJson("");
+        assertTrue("on by default (network control is what's off by default)", d.on);
+        assertEquals(Corner.Place.TOP_RIGHT, d.place);
+        assertEquals(45, d.seconds);
+        assertFalse("silent by default", d.chime);
+        assertFalse(d.motion);
+        assertTrue(d.restore);
+        Corner.Bell bad = Corner.Bell.fromJson("{\"seconds\": 7, \"size\": 90, \"corner\": \"middle\", \"cooldown\": 5}");
+        assertEquals(45, bad.seconds);
+        assertEquals(33, bad.size);
+        assertEquals(Corner.Place.TOP_RIGHT, bad.place);
+        assertEquals(60, bad.cooldown);
+        assertEquals(45, Corner.Bell.fromJson("not json").seconds);
+    }
+
+    @Test
+    public void doorbellSteps() {
+        assertEquals(60, Corner.step(Corner.BELL_SECONDS, 45, 1));
+        assertEquals(120, Corner.step(Corner.BELL_SECONDS, 120, 1));
+        assertEquals(10, Corner.next(Corner.BELL_SECONDS, 120));
+        assertEquals(0, Corner.step(Corner.COOLDOWNS, 30, -1));
+    }
+
     @Test
     public void sizesCycle() {
         assertEquals(33, Corner.nextSize(25));

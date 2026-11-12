@@ -39,6 +39,7 @@
   <li><strong>Your playlist</strong>: the channels of an M3U playlist you point it at</li>
   <li><strong>HDMI inputs</strong>: on a TV with HDMI inputs, any of them (a game console, a set-top box, a camera's HDMI out) by the name the TV gives it</li>
   <li><strong>Network control</strong>: Home Assistant, a doorbell or any device on your network opens a camera or input in the corner with an HTTP request, for as long as you like, and closes it; off unless you switch it on, and every request needs the TV's token</li>
+  <li><strong>Smart doorbell popups</strong>: a ring (from Home Assistant's Ring, Nest, Reolink or UniFi integrations, or any automation) shows the doorbell's name, "Someone is at the door" and the time over the door camera's video or snapshot, or alone if there's no picture; it closes by itself and the corner goes back to what was in it. Repeated rings and motion are kept in check, and a test popup needs no doorbell. See the <a href="docs/doorbell.md">doorbell guide</a></li>
   <li><strong>Snapshot and MJPEG cameras</strong>: a camera address that answers with a picture is refreshed every second, and an MJPEG stream is shown picture by picture; neither needs a video decoder, so they play even where a second video can't</li>
   <li><strong>Cycle cameras</strong>: every camera in turn, 5 to 60 seconds each, like a security monitor</li>
   <li><strong>Reopen after restart</strong>: optionally, what was in the corner comes back when the TV starts</li>
@@ -106,6 +107,7 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
   <tr><td><strong>Cameras</strong></td><td>Your cameras by name; OK plays one. <strong>Add a camera</strong> asks for a name and an <code>rtsp://</code> or <code>http(s)://</code> address; <strong>Remove cameras</strong> (OK twice) removes them all. With two or more, <strong>Cycle cameras</strong> shows each in turn; ◀ ▶ sets 5 to 60 seconds each. A camera address can also be its snapshot (a picture) or MJPEG address.</td></tr>
   <tr><td><strong>Channels</strong></td><td>The channels of your playlist; OK plays one. <strong>Playlist address</strong> is an M3U playlist.</td></tr>
   <tr><td><strong>Inputs</strong></td><td>The TV's HDMI (and other) inputs, by the names the TV shows; OK plays one. Boxes and sticks have none.</td></tr>
+  <tr><td><strong>Doorbell</strong></td><td>Doorbell popups On (default) or Off; the <strong>Camera</strong> to show (or none), <strong>Show</strong> camera or notification only, the popup's <strong>corner</strong> (top right by default) and <strong>size</strong>, <strong>Duration</strong> 10 to 120 seconds (45 by default), <strong>Chime</strong>, <strong>Triggers</strong> ring only or ring and motion, <strong>Motion cooldown</strong>, <strong>Restore previous</strong>, and <strong>Test doorbell popup</strong>. Details in the <a href="docs/doorbell.md#on-the-tv">doorbell guide</a>.</td></tr>
   <tr><td><strong>Network control</strong></td><td>Off (default) or On. On, it shows this TV's address and the token your automations send; <strong>New token</strong> (OK twice) replaces it.</td></tr>
   <tr><td><strong>Corner</strong></td><td>Bottom right (default), bottom left, top left, top right.</td></tr>
   <tr><td><strong>Size</strong></td><td>25, 33 (default) or 40 % of the screen's width, 16:9.</td></tr>
@@ -124,8 +126,9 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
   <tr><td><code>POST /play</code> with <code>cycle=</code></td><td>Shows every camera in turn, that many seconds each.</td></tr>
   <tr><td><code>seconds=</code></td><td>With any of them: it ends by itself after that long (up to 3600), and the corner goes back to what was in it before, or closes if it was empty. A doorbell over the baby monitor, then the baby monitor again. Without it, it stays up until stopped.</td></tr>
   <tr><td><code>corner=</code>, <code>size=</code>, <code>sound=</code></td><td>With any of them: this window only, for example <code>corner=top-left</code>, <code>size=50</code> (15 to 60 % of the screen's width), <code>sound=on</code>. Without them, the app's settings.</td></tr>
+  <tr><td><code>POST /doorbell</code></td><td>A doorbell popup: <code>event=ring</code> (or <code>motion</code>, <code>test</code>, <code>dismiss</code>), <code>device=Front Door</code>, and <code>camera=</code> a camera's name or <code>url=</code> an address for this popup only; the rest follows the Doorbell settings. See <a href="docs/doorbell.md#the-http-api">the doorbell API</a>.</td></tr>
   <tr><td><code>POST /stop</code></td><td>Closes the window.</td></tr>
-  <tr><td><code>GET /status</code></td><td><code>{"playing": "Front door", "cycling": false}</code>; <code>playing</code> is <code>null</code> when the corner is closed.</td></tr>
+  <tr><td><code>GET /status</code></td><td><code>{"playing": "Front door", "cycling": false, "doorbell": null, "showing": "video"}</code>; <code>playing</code> is <code>null</code> when the corner is closed, <code>doorbell</code> names the doorbell whose popup is up, <code>showing</code> is <code>video</code>, <code>mjpeg</code>, <code>snapshot</code>, <code>input</code> or <code>notification</code>.</td></tr>
 </table>
 
 <p>Parameters go in the query, a form body or a JSON body. Replies are JSON: <code>{"ok": true, "playing": ...}</code> or <code>{"error": ...}</code> with status 400, 401 (no or wrong token), 404 (no such camera or input) or 409 (the window isn't allowed).</p>
@@ -153,7 +156,24 @@ rest_command:
       Authorization: !secret corner_player_auth
 </pre>
 
-<p>Then an automation calls <code>rest_command.tv_corner_play</code> with <code>name: Front door</code> when the doorbell rings. Give the TV a fixed address in your router so automations keep finding it.</p>
+<p>Then an automation calls <code>rest_command.tv_corner_play</code> with <code>name: Front door</code> when something happens. Give the TV a fixed address in your router so automations keep finding it.</p>
+
+<h3>Smart doorbell</h3>
+
+<p>For a doorbell, use <code>POST /doorbell</code> instead: the popup carries a banner with the doorbell's name and the time, falls back to the banner alone when there's no picture, ignores the same press sent twice, and follows its own Doorbell settings on the TV. The <a href="docs/doorbell.md">doorbell guide</a> has the Ring + Home Assistant setup (<code>rest_command</code>, automations for ring and motion, a script to open the door camera by hand, secrets in <code>secrets.yaml</code>), other doorbells and cameras, the full API, troubleshooting and limitations.</p>
+
+<p align="center">
+  <img src="assets/doorbell-mockup.svg" alt="Mockup of the doorbell popup: a camera picture with a dark banner reading Front Door, Someone is at the door, 8:42 PM, SNAPSHOT" width="720"/>
+</p>
+<p align="center"><sub>A mockup, not a screenshot.</sub></p>
+
+<pre>
+curl -X POST -H "Authorization: Bearer &lt;token&gt;" -H "Content-Type: application/json" \
+  -d '{"event": "ring", "device": "Front Door", "camera": "Front door", "seconds": 45}' \
+  http://&lt;tv ip&gt;:8765/doorbell
+</pre>
+
+<p>Ring live video isn't available to Corner Player: Ring sends Home Assistant live video over WebRTC only, so a Ring popup shows the camera's snapshot through Home Assistant's camera proxy (tagged <code>SNAPSHOT</code>), or the banner alone. Cameras with RTSP (Reolink, UniFi Protect, Amcrest, ONVIF) show live video.</p>
 
 <h2>How It Works</h2>
 
@@ -164,7 +184,7 @@ rest_command:
   <tr><td><code>INTERNET</code></td><td>The cameras and playlist you add, and nothing else.</td></tr>
   <tr><td>Display over other apps (<code>SYSTEM_ALERT_WINDOW</code>)</td><td>To draw the corner window over other apps. It never takes focus or the remote's keys. Granted by <code>install.sh</code>, since many TVs hide the setting.</td></tr>
   <tr><td>Foreground service (<code>FOREGROUND_SERVICE</code>, <code>FOREGROUND_SERVICE_MEDIA_PLAYBACK</code>)</td><td>One service plays the stream while the window is up, and stops with it.</td></tr>
-  <tr><td><code>FOREGROUND_SERVICE_SPECIAL_USE</code>, <code>RECEIVE_BOOT_COMPLETED</code>, <code>ACCESS_NETWORK_STATE</code></td><td>Network control only, while it's on: a second service listens for your automations and comes back after a restart; the TV's address is shown on screen.</td></tr>
+  <tr><td><code>FOREGROUND_SERVICE_SPECIAL_USE</code>, <code>RECEIVE_BOOT_COMPLETED</code>, <code>ACCESS_NETWORK_STATE</code></td><td>Network control only, while it's on: a second service listens for your automations (doorbell events included) and comes back after a restart; the TV's address is shown on screen.</td></tr>
 </table>
 
 <p>Plain <code>http://</code> and <code>rtsp://</code> are allowed for the home network (<code>res/xml/network.xml</code>). <code>ConfigProvider</code> takes a pushed file and only the ADB shell can use it (it requires <code>WRITE_SECURE_SETTINGS</code>). More in <a href="SECURITY.md">SECURITY.md</a>.</p>
@@ -178,12 +198,13 @@ rest_command:
   <li><strong>HDMI is up to the TV.</strong> Corner Player shows the inputs the TV lists for apps; some makers list none, or refuse a second app. Most TVs can show only one HDMI input at a time, so an HDMI input in the corner over another HDMI input (or over the TV's own tuner) usually won't work; over an app it should. With nothing on the input, the window says "No picture" and waits. An input's window has square corners and no shadow: many TV chips show a black window otherwise. Its name stays on it until the TV reports a picture, so on a black window, a name that stays means the TV sends no picture, and a name that fades means the TV says it does (please <a href="../../issues">open an issue</a> with the TV's model). On some chips (Realtek) a screenshot shows the HDMI picture's place wrongly; the TV itself shows it in the corner.</li>
   <li><strong>Network control is plain HTTP</strong> on your home network: the token keeps others on the network out, but anyone who can read your network traffic can read it too. Never forward port 8765 to the internet; from away, use a VPN to your home network.</li>
   <li><strong>Snapshot cameras</strong> are asked for a new picture every second, and a user name and password in their address are sent as Basic authentication; cameras that only take Digest authentication for snapshots won't send one.</li>
-  <li><strong>A stream that fails</strong> is retried once; then the window says it can't play and closes after a few seconds.</li>
+  <li><strong>A stream that fails</strong> is retried once; then the window says it can't play and closes after a few seconds. In a doorbell popup, the banner stays instead, alone, until its time is up.</li>
+  <li><strong>Doorbell popups</strong> never wake a TV in standby, can't show Ring live video (WebRTC only), and, like any corner window, may be hidden over protected video or an HDMI input on some TVs. More in the <a href="docs/doorbell.md#limitations">doorbell guide</a>.</li>
 </ul>
 
 <h2>Tested On</h2>
 
-<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. HDMI inputs (added for <a href="../../issues/1">#1</a>, v0.2.0): the same TV lists AV and HDMI1 to HDMI3; HDMI1 and HDMI2 opened in the bottom-right corner over Home with nothing plugged in, saying "No picture on HDMI1", and Stop let go of the input. A picture from a plugged-in device was not tried yet. v0.4.0's snapshot and MJPEG cameras, cycling, per-window corner, size and sound, the corner going back after a short one, channels by name over the network and Reopen after restart build and pass the tests, but were not tried on a TV yet. Network control (added for <a href="../../issues/3">#3</a>, v0.3.0), on the same TV with Corner Player in the background over Home: requests without or with a wrong token refused (401), unknown names, bad addresses, paths and methods answered with their errors; <code>POST /play</code> opened HDMI1 (JSON body, <code>seconds=8</code>, closed by itself) and HDMI2 (form body), <code>/status</code> followed, <code>/stop</code> closed it; it was listening again after an in-place update, and switching it off closed the port. Restarting the TV was not tried. The JVM tests cover the playlist reader, addresses and inputs, hiding camera passwords, the window's place, and network control's requests and token.</p>
+<p>MOKA R8G (Android 14), on a home app that implements the module-card spec: a public HLS test stream from a camera entry and the same kind of stream from an M3U playlist served on the home network, playing silently in the bottom-right corner over Home; the corner window opaque; Stop. A second video playing underneath (YouTube) was started but not confirmed, so check with what you watch. RTSP was not tried with a real camera. The signed v0.1.0 release APK installed with <code>install.sh</code> (<code>APK=</code>), corner window allowed. HDMI inputs (added for <a href="../../issues/1">#1</a>, v0.2.0): the same TV lists AV and HDMI1 to HDMI3; HDMI1 and HDMI2 opened in the bottom-right corner over Home with nothing plugged in, saying "No picture on HDMI1", and Stop let go of the input. A picture from a plugged-in device was not tried yet. v0.4.0's snapshot and MJPEG cameras, cycling, per-window corner, size and sound, the corner going back after a short one, channels by name over the network and Reopen after restart build and pass the tests, but were not tried on a TV yet. Network control (added for <a href="../../issues/3">#3</a>, v0.3.0), on the same TV with Corner Player in the background over Home: requests without or with a wrong token refused (401), unknown names, bad addresses, paths and methods answered with their errors; <code>POST /play</code> opened HDMI1 (JSON body, <code>seconds=8</code>, closed by itself) and HDMI2 (form body), <code>/status</code> followed, <code>/stop</code> closed it; it was listening again after an in-place update, and switching it off closed the port. Restarting the TV was not tried. Doorbell popups (v0.5.0) build and pass the JVM tests (requests, repeated rings, motion cooldown, the corner coming back after one or several short ones, the banner when a camera is missing or fails, settings kept), but were not tried on a TV or with a real doorbell yet. The JVM tests cover the playlist reader, addresses and inputs, hiding camera passwords, the window's place, and network control's requests and token.</p>
 
 <h2>Origin</h2>
 

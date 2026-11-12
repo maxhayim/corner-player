@@ -12,6 +12,11 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.media.AudioAttributes;
+import android.media.AudioFormat;
+import android.media.AudioTrack;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
@@ -21,8 +26,10 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.format.DateFormat;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.TextureView;
 import android.view.View;
@@ -30,12 +37,14 @@ import android.view.ViewOutlineProvider;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
@@ -48,14 +57,16 @@ import androidx.media3.exoplayer.ExoPlayer;
  * Plays one stream, one of the TV's inputs (HDMI), a camera's pictures, or every camera in turn, in a small window
  * in a corner, over whatever is on screen. The window never takes focus or keys, so the remote keeps controlling
  * the app below; Corner Player's own screen or network control changes or closes it. One opened for a few seconds
- * from the network (a doorbell) gives the corner back to what was there when it ends. Runs only while the window
- * is up.
+ * from the network (a doorbell) gives the corner back to what was there when it ends. A doorbell popup carries a
+ * banner with the doorbell's name and the time; with no camera, or one that can't be played, the banner alone.
+ * Runs only while the window is up.
  */
 public class CornerService extends Service {
     static final String TAG = "CornerPlayer";
     private static final String CHANNEL = "corner";
-    private static final String EXTRA_REQUEST = "request", EXTRA_SECONDS = "seconds";
-    private static final String ACTION_STOP = "stop", ACTION_LAYOUT = "layout";
+    private static final String EXTRA_REQUEST = "request", EXTRA_SECONDS = "seconds", EXTRA_RESTORE = "restore",
+            EXTRA_CHIME = "chime";
+    private static final String ACTION_STOP = "stop", ACTION_LAYOUT = "layout", ACTION_END_SHORT = "endShort";
     /** A stream that fails is retried once, then the window says so and closes. */
     private static final long CLOSE_AFTER_ERROR_MS = 8000;
     /** Cycling, a camera that fails is skipped after this long. */
@@ -64,11 +75,16 @@ public class CornerService extends Service {
     private static final long STILL_EVERY_MS = 1000;
     /** Stills: this many failures in a row and the window says it can't play. */
     private static final int STILL_FAILURES = 3;
+    private static final int BANNER = 0xD90D1117, ACCENT = 0xFFFF9F43;
 
     /** What plays now, for the app's screen and network control; null when nothing does. */
     static volatile String playing;
     /** Whether the corner is cycling through the cameras. */
     static volatile boolean cycling;
+    /** The doorbell whose popup is up; null when none is. */
+    static volatile String doorbell;
+    /** What the window shows: video, mjpeg, snapshot, input or notification; null when it's closed. */
+    static volatile String showing;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable closeLater = this::stopSelf;
@@ -79,15 +95,15 @@ public class CornerService extends Service {
     /** Holds the picture: a TextureView for a stream, a TvView for an input, an ImageView for pictures. */
     private FrameLayout screen;
     private TextView label;
+    /** A doorbell popup's banner, and its tag saying whether the picture is live or a snapshot. */
+    private LinearLayout banner;
+    private TextView bannerTag;
     private ExoPlayer player;
     private TvView tv;
     private ImageView picture;
     private boolean retried;
-    /** What the corner shows, with its own window settings. */
-    private Corner.Request now;
-    /** While a short one from the network is up: what to go back to when it ends. */
-    private Corner.Request back;
-    private boolean isShort;
+    /** What the corner shows, with its own window settings, and what it goes back to after a short one. */
+    private final Corner.Slot slot = new Corner.Slot();
     private List<Corner.Source> cameras;
     private int cameraIndex;
     /** Bumped whenever the picture changes, so a pictures thread for an older one stops. */
@@ -107,13 +123,26 @@ public class CornerService extends Service {
 
     /** With seconds above 0, it ends by itself after that long (a doorbell, say), and what was there comes back. */
     static void start(Context c, Corner.Request r, int seconds) {
+        ring(c, r, seconds, true, false);
+    }
+
+    /**
+     * A short one (a doorbell popup): restore says whether the corner goes back to what was in it when it ends,
+     * chime whether a short chime sounds as it opens.
+     */
+    static void ring(Context c, Corner.Request r, int seconds, boolean restore, boolean chime) {
         c.startForegroundService(new Intent(c, CornerService.class).putExtra(EXTRA_REQUEST, r.toJson())
-                .putExtra(EXTRA_SECONDS, seconds));
+                .putExtra(EXTRA_SECONDS, seconds).putExtra(EXTRA_RESTORE, restore).putExtra(EXTRA_CHIME, chime));
     }
 
     static void stop(Context c) {
         Config.saveLast(c, null);
         if (playing != null) c.startService(new Intent(c, CornerService.class).setAction(ACTION_STOP));
+    }
+
+    /** Ends a short one (a doorbell popup) now, as its timer would; anything else stays. */
+    static void dismiss(Context c) {
+        if (playing != null) c.startService(new Intent(c, CornerService.class).setAction(ACTION_END_SHORT));
     }
 
     /** Corner, size or sound changed in the app: the window follows at once. */
@@ -170,9 +199,18 @@ public class CornerService extends Service {
             return START_NOT_STICKY;
         }
         if (ACTION_LAYOUT.equals(action)) {
-            // The app's settings win over what this window asked for.
-            if (now != null) now = now.plain();
+            // The app's settings win over what this window asked for (a doorbell popup keeps its own).
+            if (slot.now != null) slot.replace(slot.now.plain());
             layout();
+            return START_NOT_STICKY;
+        }
+        if (ACTION_END_SHORT.equals(action)) {
+            if (slot.isShort()) {
+                main.removeCallbacks(endShort);
+                endShort();
+            } else if (window == null) {
+                stopSelf();
+            }
             return START_NOT_STICKY;
         }
         Corner.Request r = Corner.Request.fromJson(intent.getStringExtra(EXTRA_REQUEST));
@@ -182,17 +220,12 @@ public class CornerService extends Service {
         }
         int seconds = Corner.seconds(String.valueOf(intent.getIntExtra(EXTRA_SECONDS, 0)));
         main.removeCallbacks(endShort);
-        if (seconds > 0) {
-            // A second short one keeps the first's way back.
-            if (!isShort) back = now;
-            isShort = true;
-            main.postDelayed(endShort, seconds * 1000L);
-        } else {
-            back = null;
-            isShort = false;
-            Config.saveLast(this, r);
-        }
-        begin(r);
+        // A second short one keeps the first's way back.
+        slot.open(r, seconds > 0, intent.getBooleanExtra(EXTRA_RESTORE, true));
+        if (seconds > 0) main.postDelayed(endShort, seconds * 1000L);
+        else Config.saveLast(this, r);
+        if (intent.getBooleanExtra(EXTRA_CHIME, false)) chime();
+        begin(slot.now);
         return START_NOT_STICKY;
     }
 
@@ -210,6 +243,8 @@ public class CornerService extends Service {
         window = null;
         playing = null;
         cycling = false;
+        doorbell = null;
+        showing = null;
         super.onDestroy();
     }
 
@@ -218,11 +253,16 @@ public class CornerService extends Service {
         return null;
     }
 
+    /** Shows r, which the slot already holds. */
     private void begin(Corner.Request r) {
-        now = r;
         main.removeCallbacks(nextCamera);
         main.removeCallbacks(closeLater);
-        if (r.cycle > 0) {
+        doorbell = r.bell;
+        if (r.card()) {
+            cameras = null;
+            cycling = false;
+            showCard(false);
+        } else if (r.cycle > 0) {
             cameras = Config.cameras(this);
             if (cameras.isEmpty()) {
                 stopSelf();
@@ -241,9 +281,7 @@ public class CornerService extends Service {
 
     /** The short one from the network is over: back to what was there, or close. */
     private void endShort() {
-        Corner.Request b = back;
-        back = null;
-        isShort = false;
+        Corner.Request b = slot.end();
         if (b != null) begin(b);
         else stopSelf();
     }
@@ -251,7 +289,7 @@ public class CornerService extends Service {
     private void showCamera() {
         Corner.Source s = cameras.get(cameraIndex % cameras.size());
         show(s.name, s.url);
-        main.postDelayed(nextCamera, now.cycle * 1000L);
+        main.postDelayed(nextCamera, slot.now.cycle * 1000L);
     }
 
     private void nextCamera() {
@@ -266,20 +304,158 @@ public class CornerService extends Service {
         boolean input = Corner.isInput(url);
         if (window == null) build(input);
         if (window == null) return;
+        Corner.Request r = slot.now;
         label.animate().cancel();
         label.setText(name);
         label.setAlpha(1f);
         release();
         screen.removeAllViews();
         frame(input);
+        setBanner(r != null && r.bell != null ? r : null, false);
+        if (r != null && r.bell != null) label.setAlpha(0f);
         if (input) {
+            setShowing("input");
             showInput(name, Corner.inputId(url));
         } else {
-            fadeLabel();
+            setShowing(null);
+            if (r == null || r.bell == null) fadeLabel();
             if (url.toLowerCase(Locale.ROOT).startsWith("http") && !Corner.surelyVideo(url)) look(name, url);
             else showStream(name, url);
         }
         playing = name;
+    }
+
+    /** A doorbell popup with nothing to play, or whose camera can't be played: its banner alone. */
+    private void showCard(boolean noVideo) {
+        main.removeCallbacks(closeLater);
+        Corner.Request r = slot.now;
+        if (window == null) build(false);
+        if (window == null) return;
+        release();
+        screen.removeAllViews();
+        frame(false);
+        label.animate().cancel();
+        label.setAlpha(0f);
+        setBanner(null, false);
+        LinearLayout card = bannerView(r, true);
+        screen.addView(card, new FrameLayout.LayoutParams(-1, -2));
+        setShowing("notification");
+        if (noVideo) bannerTag.setText("NO VIDEO");
+        playing = r.bell;
+    }
+
+    /** Puts a doorbell's banner over the picture (r not null), or takes it away. */
+    private void setBanner(Corner.Request r, boolean card) {
+        if (banner != null && banner.getParent() == window) window.removeView(banner);
+        banner = null;
+        bannerTag = null;
+        if (r == null) return;
+        LinearLayout b = bannerView(r, card);
+        window.addView(b, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+    }
+
+    /**
+     * The doorbell's banner: a bell, its name, "Someone is at the door" (or motion), the time and whether the picture
+     * is live. Sized to the window so it reads from across the room.
+     */
+    private LinearLayout bannerView(Corner.Request r, boolean card) {
+        float dp = getResources().getDisplayMetrics().density;
+        int w = rectFor(r)[2];
+        LinearLayout b = new LinearLayout(this);
+        b.setOrientation(LinearLayout.HORIZONTAL);
+        b.setGravity(Gravity.CENTER_VERTICAL);
+        int pad = Math.round(Math.max(8 * dp, w * 0.03f));
+        int vpad = card ? pad * 3 / 2 : pad;
+        b.setPadding(pad, vpad, pad, vpad);
+        if (!card) b.setBackgroundColor(BANNER);
+
+        int icon = Math.round(Math.max(28 * dp, w * (card ? 0.13f : 0.09f)));
+        ImageView bell = new ImageView(this);
+        bell.setImageResource(R.drawable.ic_bell);
+        GradientDrawable dot = new GradientDrawable();
+        dot.setShape(GradientDrawable.OVAL);
+        dot.setColor(ACCENT);
+        bell.setBackground(dot);
+        int ip = icon / 5;
+        bell.setPadding(ip, ip, ip, ip);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(icon, icon);
+        lp.rightMargin = pad;
+        b.addView(bell, lp);
+
+        LinearLayout lines = new LinearLayout(this);
+        lines.setOrientation(LinearLayout.VERTICAL);
+        TextView name = text(r.bell, Math.max(16 * dp, w * 0.052f), Color.WHITE);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        lines.addView(name);
+        lines.addView(text(r.motion ? "Motion at the door" : "Someone is at the door",
+                Math.max(13 * dp, w * 0.04f), 0xFFE6EDF3));
+        LinearLayout meta = new LinearLayout(this);
+        meta.setOrientation(LinearLayout.HORIZONTAL);
+        meta.addView(text(DateFormat.getTimeFormat(this).format(new Date(r.at > 0 ? r.at : System.currentTimeMillis())),
+                Math.max(12 * dp, w * 0.034f), 0xFFAFB8C1));
+        bannerTag = text("", Math.max(11 * dp, w * 0.03f), ACCENT);
+        bannerTag.setTypeface(Typeface.DEFAULT_BOLD);
+        bannerTag.setPadding(pad, 0, 0, 0);
+        meta.addView(bannerTag);
+        lines.addView(meta);
+        b.addView(lines, new LinearLayout.LayoutParams(0, -2, 1f));
+        banner = card ? null : b;
+        return b;
+    }
+
+    private TextView text(String s, float px, int color) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_PX, px);
+        t.setTextColor(color);
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        return t;
+    }
+
+    /** What the window shows now, for /status, and on a doorbell's banner: live, or a snapshot. */
+    private void setShowing(String what) {
+        showing = what;
+        if (bannerTag == null) return;
+        if ("snapshot".equals(what)) bannerTag.setText("SNAPSHOT");
+        else if ("video".equals(what) || "mjpeg".equals(what) || "input".equals(what)) bannerTag.setText("LIVE");
+        else bannerTag.setText("");
+    }
+
+    /** A short two-note chime (synthesised, so it needs no sound file), at the TV's notification volume. */
+    private void chime() {
+        new Thread(() -> {
+            int rate = 22050, each = rate * 7 / 10;
+            float[] notes = {659.25f, 523.25f};
+            short[] pcm = new short[each * notes.length];
+            for (int n = 0; n < notes.length; n++) {
+                for (int i = 0; i < each; i++) {
+                    double t = i / (double) rate;
+                    double v = Math.sin(2 * Math.PI * notes[n] * t) * 0.8 + Math.sin(4 * Math.PI * notes[n] * t) * 0.2;
+                    double attack = Math.min(1, i / (rate * 0.01));
+                    pcm[n * each + i] = (short) (v * attack * Math.exp(-4 * t) * 0.45 * Short.MAX_VALUE);
+                }
+            }
+            AudioTrack track = null;
+            try {
+                track = new AudioTrack.Builder()
+                        .setAudioAttributes(new AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                        .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                        .setTransferMode(AudioTrack.MODE_STATIC)
+                        .setBufferSizeInBytes(pcm.length * 2)
+                        .build();
+                track.write(pcm, 0, pcm.length);
+                track.play();
+                Thread.sleep(pcm.length * 1000L / rate + 200);
+            } catch (Exception e) {
+                Log.w(TAG, "chime: " + e.getMessage());
+            } finally {
+                if (track != null) track.release();
+            }
+        }, "chime").start();
     }
 
     private void showStream(String name, String url) {
@@ -289,6 +465,11 @@ public class CornerService extends Service {
         player.setVideoTextureView(video);
         player.setVolume(sound() ? 1f : 0f);
         player.addListener(new Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int state) {
+                if (state == Player.STATE_READY) setShowing("video");
+            }
+
             @Override
             public void onPlayerError(PlaybackException e) {
                 Log.w(TAG, "stream error: " + e.getErrorCodeName());
@@ -332,6 +513,7 @@ public class CornerService extends Service {
                     picture = new ImageView(this);
                     picture.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     screen.addView(picture, new FrameLayout.LayoutParams(-1, -1));
+                    setShowing(kind == Corner.Kind.MJPEG ? "mjpeg" : "snapshot");
                 });
                 if (kind == Corner.Kind.MJPEG) mjpeg(gen, name, url, c);
                 else stills(gen, name, url, c);
@@ -367,7 +549,7 @@ public class CornerService extends Service {
                     }
                 }
             } catch (IOException e) {
-                Log.w(TAG, "mjpeg: " + e.getMessage());
+                Log.w(TAG, "mjpeg: " + e.getClass().getSimpleName());
             } finally {
                 if (c != null) c.disconnect();
                 c = null;
@@ -388,6 +570,7 @@ public class CornerService extends Service {
                     pictures = c;
                 }
                 byte[] b = null;
+                // An expired address (Home Assistant's camera token after a while) answers 401 or 403: a failure.
                 if (c.getResponseCode() / 100 == 2) {
                     try (InputStream in = c.getInputStream()) {
                         b = Net.read(in, Corner.MAX_PICTURE_BYTES);
@@ -453,6 +636,7 @@ public class CornerService extends Service {
                 Log.i(TAG, "input video unavailable: " + reason);
                 if (reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_TUNING
                         || reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_BUFFERING) return;
+                if (slot.now != null && slot.now.bell != null) return;
                 // Nothing plugged in, or the device on it is off: say so, and keep waiting for a picture.
                 label.animate().cancel();
                 label.setText("No picture on " + name);
@@ -462,6 +646,7 @@ public class CornerService extends Service {
             @Override
             public void onVideoAvailable(String id) {
                 Log.i(TAG, "input video available");
+                if (slot.now != null && slot.now.bell != null) return;
                 label.setText(name);
                 fadeLabel();
             }
@@ -480,15 +665,27 @@ public class CornerService extends Service {
         label.animate().alpha(0f).setStartDelay(3000).setDuration(600).start();
     }
 
-    /** Says so; then cycling moves on, a short one gives the corner back, and anything else closes. */
+    /**
+     * Says so; then cycling moves on, a doorbell popup keeps its banner without the picture, a short one gives the
+     * corner back, and anything else closes.
+     */
     private void failed(String name) {
+        Corner.Request r = slot.now;
+        if (r != null && r.bell != null && r.url != null) {
+            // The doorbell still says someone is there; its timer runs on.
+            Log.w(TAG, "doorbell camera can't be played: banner only");
+            slot.replace(r.cardOnly());
+            showCard(true);
+            layout();
+            return;
+        }
         label.animate().cancel();
         label.setText("Can't play " + name);
         label.setAlpha(1f);
         if (cameras != null) {
             main.removeCallbacks(nextCamera);
             main.postDelayed(nextCamera, SKIP_AFTER_ERROR_MS);
-        } else if (isShort) {
+        } else if (slot.isShort()) {
             main.removeCallbacks(endShort);
             main.postDelayed(endShort, CLOSE_AFTER_ERROR_MS);
         } else {
@@ -545,11 +742,15 @@ public class CornerService extends Service {
     private void frame(boolean input) {
         window.setClipToOutline(!input);
         window.setElevation(input ? 0 : 8 * getResources().getDisplayMetrics().density);
+        boolean card = slot.now != null && slot.now.card();
+        window.setBackgroundColor(card ? BANNER : Color.BLACK);
     }
 
-    /** This window's sound if it asked for one, else the app's. */
+    /** This window's sound if it asked for one, else the app's. A doorbell popup's camera is silent unless asked. */
     private boolean sound() {
-        return now != null && now.sound != null ? now.sound : Config.sound(this);
+        Corner.Request now = slot.now;
+        if (now != null && now.sound != null) return now.sound;
+        return now == null || now.bell == null ? Config.sound(this) : false;
     }
 
     private void layout() {
@@ -558,13 +759,22 @@ public class CornerService extends Service {
         if (window != null) wm.updateViewLayout(window, params());
     }
 
-    private WindowManager.LayoutParams params() {
+    private int[] rectFor(Corner.Request now) {
         DisplayMetrics m = getResources().getDisplayMetrics();
         Corner.Place place = now != null && now.place != null ? now.place : Config.place(this);
         int size = now != null && now.size > 0 ? now.size : Config.size(this);
-        int[] r = Corner.rect(m.widthPixels, m.heightPixels, place, size, Math.round(32 * m.density));
+        return Corner.rect(m.widthPixels, m.heightPixels, place, size, Math.round(32 * m.density));
+    }
+
+    private WindowManager.LayoutParams params() {
+        DisplayMetrics m = getResources().getDisplayMetrics();
+        Corner.Request now = slot.now;
+        int[] r = rectFor(now);
         windowWidth = r[2];
-        WindowManager.LayoutParams p = new WindowManager.LayoutParams(r[2], r[3],
+        boolean card = now != null && now.card();
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(r[2],
+                // The banner alone is only as tall as its text.
+                card ? WindowManager.LayoutParams.WRAP_CONTENT : r[3],
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 // Not FLAG_NOT_TOUCHABLE: since Android 12 a window that lets touches through is drawn at most 80 %
                 // opaque, which would show what is under the video. TVs have no touchscreen; a pointer can't click
@@ -572,9 +782,18 @@ public class CornerService extends Service {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
-        p.gravity = Gravity.TOP | Gravity.START;
-        p.x = r[0];
-        p.y = r[1];
+        if (card) {
+            // Anchored to its corner, so a banner at the bottom grows upwards.
+            Corner.Place place = now.place != null ? now.place : Config.place(this);
+            boolean left = place == Corner.Place.TOP_LEFT || place == Corner.Place.BOTTOM_LEFT;
+            boolean top = place == Corner.Place.TOP_LEFT || place == Corner.Place.TOP_RIGHT;
+            p.gravity = (top ? Gravity.TOP : Gravity.BOTTOM) | (left ? Gravity.LEFT : Gravity.RIGHT);
+            p.x = p.y = Math.round(32 * m.density);
+        } else {
+            p.gravity = Gravity.TOP | Gravity.START;
+            p.x = r[0];
+            p.y = r[1];
+        }
         p.setTitle("Corner Player");
         return p;
     }

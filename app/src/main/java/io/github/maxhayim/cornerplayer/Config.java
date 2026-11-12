@@ -80,6 +80,15 @@ final class Config {
         of(c).edit().putString("last", r == null ? "" : r.toJson()).apply();
     }
 
+    /** The Doorbell settings: what a doorbell event shows, where and for how long. */
+    static Corner.Bell bell(Context c) {
+        return Corner.Bell.fromJson(of(c).getString("doorbell", ""));
+    }
+
+    static void saveBell(Context c, Corner.Bell b) {
+        of(c).edit().putString("doorbell", b.toJson()).apply();
+    }
+
     /** Network control: off unless switched on, on the TV or in a pushed config.json. */
     static boolean remote(Context c) {
         return of(c).getBoolean("remote", false);
@@ -102,8 +111,8 @@ final class Config {
     }
 
     /**
-     * Takes a pushed config.json ({"cameras": [{"name", "url"}], "playlist": url, "remote": true, "token": ...}),
-     * and deletes it.
+     * Takes a pushed config.json ({"cameras": [{"name", "url"}], "playlist": url, "remote": true, "token": ...,
+     * "doorbell": {"camera": ..., "seconds": 45, ...}}), and deletes it.
      */
     static boolean importPushed(Context c) {
         File dir = c.getExternalFilesDir(null);
@@ -117,6 +126,8 @@ final class Config {
             if (o.has("remote")) setRemote(c, o.optBoolean("remote"));
             String token = o.optString("token", "");
             if (Corner.validToken(token)) of(c).edit().putString("token", token).apply();
+            JSONObject bell = o.optJSONObject("doorbell");
+            if (bell != null) saveBell(c, Corner.Bell.fromJson(bell.toString()));
             return true;
         } catch (Exception e) {
             return false;
