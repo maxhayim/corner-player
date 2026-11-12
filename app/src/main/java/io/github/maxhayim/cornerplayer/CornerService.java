@@ -75,7 +75,8 @@ public class CornerService extends Service {
     private static final long STILL_EVERY_MS = 1000;
     /** Stills: this many failures in a row and the window says it can't play. */
     private static final int STILL_FAILURES = 3;
-    private static final int BANNER = 0xD90D1117, ACCENT = 0xFFFF9F43;
+    /** Over a picture the banner lets a little through; alone, as a card, it hides what's under it. */
+    private static final int BANNER = 0xD90D1117, CARD = 0xFF0D1117, ACCENT = 0xFFFF9F43;
 
     /** What plays now, for the app's screen and network control; null when nothing does. */
     static volatile String playing;
@@ -743,7 +744,7 @@ public class CornerService extends Service {
         window.setClipToOutline(!input);
         window.setElevation(input ? 0 : 8 * getResources().getDisplayMetrics().density);
         boolean card = slot.now != null && slot.now.card();
-        window.setBackgroundColor(card ? BANNER : Color.BLACK);
+        window.setBackgroundColor(card ? CARD : Color.BLACK);
     }
 
     /** This window's sound if it asked for one, else the app's. A doorbell popup's camera is silent unless asked. */

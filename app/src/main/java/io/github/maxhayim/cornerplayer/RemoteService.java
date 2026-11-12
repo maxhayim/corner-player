@@ -156,6 +156,9 @@ public class RemoteService extends Service {
             reply(out, 413, error("Too large."));
             return;
         }
+        // Read before answering, even a refusal: closing with the body unread can reset the connection, and the
+        // caller would lose the answer.
+        Map<String, String> body = body(in, length);
         if (!Corner.authorized(Config.token(this), auth)) {
             reply(out, 401, error("Needs Authorization: Bearer and the token shown in Corner Player."));
             return;
@@ -163,7 +166,6 @@ public class RemoteService extends Service {
         int q = target.indexOf('?');
         String path = q < 0 ? target : target.substring(0, q);
         Map<String, String> params = Corner.query(q < 0 ? "" : target.substring(q + 1));
-        Map<String, String> body = body(in, length);
         if (body != null) params.putAll(body);
 
         if (path.equals("/status") && method.equals("GET")) {
