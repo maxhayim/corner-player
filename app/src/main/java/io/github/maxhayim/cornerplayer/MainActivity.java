@@ -319,10 +319,11 @@ public class MainActivity extends Activity {
         add(new Row(this, "Show", "Camera: its picture with the banner over it. Notification only: the banner alone.",
                 false, bellSet(b -> b.video = !b.video), null)).setValue(bell.video ? "Camera" : "Notification only");
         add(new Row(this, "Popup corner", null, false, bellSet(b ->
-                b.place = Corner.Place.values()[(b.place.ordinal() + 1) % Corner.Place.values().length]), null))
-                .setValue(Corner.placeName(bell.place));
+                b.place = Corner.nextBellPlace(b.place)), null))
+                .setValue(bell.place == null ? "Same as video" : Corner.placeName(bell.place));
         add(new Row(this, "Popup size", "Width, as a share of the screen.", false,
-                bellSet(b -> b.size = Corner.nextSize(b.size)), null)).setValue(bell.size + " %");
+                bellSet(b -> b.size = Corner.nextBellSize(b.size)), null))
+                .setValue(bell.size == 0 ? "Same as video" : bell.size + " %");
         add(new Row(this, "Duration", "How long the popup stays. ◀ ▶ or OK.", false,
                 bellSet(b -> b.seconds = Corner.next(Corner.BELL_SECONDS, b.seconds)),
                 bellStep(Corner.BELL_SECONDS, true))).setValue(bell.seconds + " s");

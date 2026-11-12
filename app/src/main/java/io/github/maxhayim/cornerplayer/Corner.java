@@ -100,6 +100,17 @@ final class Corner {
             return bell != null ? this : new Request(name, url, cycle, null, 0, null);
         }
 
+        /**
+         * A doorbell popup that names no corner or size of its own takes those of the window it pops up over (the
+         * video in the corner), so it shows in the same place at the same size. With nothing there it follows the
+         * app's Corner and Size, as that window would.
+         */
+        Request over(Request current) {
+            if (bell == null || current == null || (place != null && size > 0)) return this;
+            return new Request(name, url, cycle, place != null ? place : current.place,
+                    size > 0 ? size : current.size, sound, bell, motion, at);
+        }
+
         /** The same doorbell popup with no camera: the banner alone, as when its camera can't be played. */
         Request cardOnly() {
             return new Request(name, null, 0, place, size, sound, bell, motion, at);
@@ -260,8 +271,10 @@ final class Corner {
         boolean on = true;
         /** The camera to show, by name; empty for none (the banner alone). */
         String camera = "";
-        Place place = Place.TOP_RIGHT;
-        int size = SIZES[1];
+        /** Null: the same corner as the video window. */
+        Place place;
+        /** 0: the same size as the video window. */
+        int size;
         int seconds = 45;
         /** A short chime when it pops up. Off: Corner Player is silent unless asked. */
         boolean chime;
@@ -276,7 +289,7 @@ final class Corner {
         String toJson() {
             JSONObject o = new JSONObject();
             try {
-                o.put("on", on).put("camera", camera).put("corner", place.name()).put("size", size)
+                o.put("on", on).put("camera", camera).put("popupCorner", place == null ? "SAME" : place.name()).put("popupSize", size)
                         .put("seconds", seconds).put("chime", chime).put("motion", motion).put("cooldown", cooldown)
                         .put("video", video).put("restore", restore);
             } catch (Exception ignored) {
@@ -295,9 +308,10 @@ final class Corner {
             }
             b.on = o.optBoolean("on", b.on);
             b.camera = label(o.optString("camera", ""), "");
-            Place p = parsePlace(o.optString("corner", null));
-            if (p != null) b.place = p;
-            int size = o.optInt("size", b.size);
+            // popupCorner/popupSize since 0.5.3, when the popup took the video window's place by default; the
+            // 0.5.0 keys (corner, size) held the old fixed default, so they're left behind.
+            b.place = parsePlace(o.optString("popupCorner", null));
+            int size = o.optInt("popupSize", 0);
             if (contains(SIZES, size)) b.size = size;
             int seconds = o.optInt("seconds", b.seconds);
             if (contains(BELL_SECONDS, seconds)) b.seconds = seconds;
@@ -745,6 +759,19 @@ final class Corner {
             case BOTTOM_LEFT: return "Bottom left";
             default: return "Bottom right";
         }
+    }
+
+    /** The doorbell popup's corner setting: the same as the video window, then each corner. */
+    static Place nextBellPlace(Place current) {
+        if (current == null) return Place.values()[0];
+        int i = current.ordinal() + 1;
+        return i < Place.values().length ? Place.values()[i] : null;
+    }
+
+    /** The doorbell popup's size setting: the same as the video window, then each size. */
+    static int nextBellSize(int current) {
+        if (!contains(SIZES, current)) return SIZES[0];
+        return current == SIZES[SIZES.length - 1] ? 0 : next(SIZES, current);
     }
 
     static int nextSize(int current) {

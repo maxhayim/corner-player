@@ -217,6 +217,8 @@ public class CornerService extends Service {
             return START_NOT_STICKY;
         }
         Corner.Request r = Corner.Request.fromJson(intent.getStringExtra(EXTRA_REQUEST));
+        // A doorbell popup takes the place and size of the video window it pops up over.
+        if (r != null) r = r.over(slot.now);
         if (r == null || !canDraw(this)) {
             if (window == null) stopSelf();
             return START_NOT_STICKY;

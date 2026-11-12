@@ -31,6 +31,11 @@
 
 <p align="center"><sub>The video in the corner is a public HLS test stream of <a href="https://peach.blender.org/">Big Buck Bunny</a> (© Blender Foundation, <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>). App banners belong to their owners.</sub></p>
 
+<p align="center">
+  <img src="assets/doorbell-popup.png" alt="The doorbell popup in the top-right corner of a TV's home screen: the door camera's picture fills it, with Front Door, Someone is at the door, 11:16 AM and LIVE over the bottom of the picture" width="720"/>
+</p>
+<p align="center"><sub>A doorbell popup (<a href="#smart-doorbell">Smart doorbell</a>), on a MOKA R8G over its home screen. The door camera is a test picture served as an MJPEG feed from a computer on the same network. App banners belong to their owners.</sub></p>
+
 <h2>Features</h2>
 
 <ul>
@@ -107,7 +112,7 @@ TV_HOST=&lt;tv ip&gt; ./install.sh backup/corner-player.json
   <tr><td><strong>Cameras</strong></td><td>Your cameras by name; OK plays one. <strong>Add a camera</strong> asks for a name and an <code>rtsp://</code> or <code>http(s)://</code> address; <strong>Remove cameras</strong> (OK twice) removes them all. With two or more, <strong>Cycle cameras</strong> shows each in turn; ◀ ▶ sets 5 to 60 seconds each. A camera address can also be its snapshot (a picture) or MJPEG address.</td></tr>
   <tr><td><strong>Channels</strong></td><td>The channels of your playlist; OK plays one. <strong>Playlist address</strong> is an M3U playlist.</td></tr>
   <tr><td><strong>Inputs</strong></td><td>The TV's HDMI (and other) inputs, by the names the TV shows; OK plays one. Boxes and sticks have none.</td></tr>
-  <tr><td><strong>Doorbell</strong></td><td>Doorbell popups On (default) or Off; the <strong>Camera</strong> to show (or none), <strong>Show</strong> camera or notification only, the popup's <strong>corner</strong> (top right by default) and <strong>size</strong>, <strong>Duration</strong> 10 to 120 seconds (45 by default), <strong>Chime</strong>, <strong>Triggers</strong> ring only or ring and motion, <strong>Motion cooldown</strong>, <strong>Restore previous</strong>, and <strong>Test doorbell popup</strong>. Details in the <a href="docs/doorbell.md#on-the-tv">doorbell guide</a>.</td></tr>
+  <tr><td><strong>Doorbell</strong></td><td>Doorbell popups On (default) or Off; the <strong>Camera</strong> to show (or none), <strong>Show</strong> camera or notification only, the popup's <strong>corner</strong> and <strong>size</strong> (by default the same as the video window's), <strong>Duration</strong> 10 to 120 seconds (45 by default), <strong>Chime</strong>, <strong>Triggers</strong> ring only or ring and motion, <strong>Motion cooldown</strong>, <strong>Restore previous</strong>, and <strong>Test doorbell popup</strong>. Details in the <a href="docs/doorbell.md#on-the-tv">doorbell guide</a>.</td></tr>
   <tr><td><strong>Network control</strong></td><td>Off (default) or On. On, it shows this TV's address and the token your automations send; <strong>New token</strong> (OK twice) replaces it.</td></tr>
   <tr><td><strong>Corner</strong></td><td>Bottom right (default), bottom left, top left, top right.</td></tr>
   <tr><td><strong>Size</strong></td><td>25, 33 (default) or 40 % of the screen's width, 16:9.</td></tr>
@@ -160,12 +165,8 @@ rest_command:
 
 <h3>Smart doorbell</h3>
 
-<p>For a doorbell, use <code>POST /doorbell</code> instead: the camera's picture fills the popup, with the doorbell's name and the time over its bottom; it falls back to the banner alone when there's no picture, ignores the same press sent twice, and follows its own Doorbell settings on the TV. The <a href="docs/doorbell.md">doorbell guide</a> has the Ring + Home Assistant setup (<code>rest_command</code>, automations for ring and motion, a script to open the door camera by hand, secrets in <code>secrets.yaml</code>), other doorbells and cameras, the full API, troubleshooting and limitations.</p>
+<p>For a doorbell, use <code>POST /doorbell</code> instead: the camera's picture fills the popup, with the doorbell's name and the time over its bottom; it pops up in the same place and at the same size as the video window (unless you give it its own in Settings), falls back to the banner alone when there's no picture, ignores the same press sent twice, and follows its own Doorbell settings on the TV. A screenshot is under <a href="#screenshots">Screenshots</a>. The <a href="docs/doorbell.md">doorbell guide</a> has the Ring + Home Assistant setup (<code>rest_command</code>, automations for ring and motion, a script to open the door camera by hand, secrets in <code>secrets.yaml</code>), other doorbells and cameras, the full API, troubleshooting and limitations.</p>
 
-<p align="center">
-  <img src="assets/doorbell-popup.png" alt="The doorbell popup in the top-right corner of a TV's home screen: the door camera's picture fills it, with Front Door, Someone is at the door, 11:16 AM and LIVE over the bottom of the picture" width="720"/>
-</p>
-<p align="center"><sub>On a MOKA R8G over its home screen. The door camera is a test picture served as an MJPEG feed from a computer on the same network. App banners belong to their owners.</sub></p>
 
 <pre>
 curl -X POST -H "Authorization: Bearer &lt;token&gt;" -H "Content-Type: application/json" \

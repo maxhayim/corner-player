@@ -60,8 +60,8 @@ default); note its **Address** and **Token**. Then, under **Doorbell**:
 | **Doorbell popups** | On (default) or Off. Off, doorbell events are answered but show nothing. |
 | **Camera** | The camera shown when a request names none: None (the banner alone) or one of your cameras. OK picks the next. |
 | **Show** | Camera (default) or Notification only. |
-| **Popup corner** | Top right (default), and the other three. |
-| **Popup size** | 25, 33 (default) or 40 % of the screen's width. |
+| **Popup corner** | Same as video (default): the corner the video window uses, or the one it's in when the bell rings; or a corner of its own. |
+| **Popup size** | Same as video (default), or 25, 33 or 40 % of the screen's width. |
 | **Duration** | 10, 15, 30, 45 (default), 60 or 120 seconds. ◀ ▶ or OK. |
 | **Chime** | Off (default) or On: a short two-note chime as it pops up, at the TV's notification volume. |
 | **Triggers** | Ring only (default) or Ring and motion. |
@@ -264,8 +264,8 @@ query. All but `event` are optional; anything left out follows the Doorbell sett
 | `camera` | A saved camera's (or TV input's) name, any case | The Doorbell setting **Camera** |
 | `url` | An `rtsp://`, `http://` or `https://` address on your network, used for this popup only and never saved; wins over `camera` | none |
 | `seconds` | 5 to 600 | **Duration** |
-| `corner` | `top-right`, `top-left`, `bottom-right`, `bottom-left` | **Popup corner** |
-| `size` | 15 to 60 (percent of the screen's width) | **Popup size** |
+| `corner` | `top-right`, `top-left`, `bottom-right`, `bottom-left` | **Popup corner** (the video window's, by default) |
+| `size` | 15 to 60 (percent of the screen's width) | **Popup size** (the video window's, by default) |
 | `sound` | `on` / `off`: the chime | **Chime** |
 | `audio` | `on` / `off`: the camera's own sound | off |
 | `video` | `off`: the banner alone, even with a camera | on (per **Show**) |

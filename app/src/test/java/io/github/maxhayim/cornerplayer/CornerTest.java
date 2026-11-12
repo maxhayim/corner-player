@@ -4,6 +4,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -452,6 +453,44 @@ public class CornerTest {
     }
 
     @Test
+    public void aDoorbellPopupTakesTheVideoWindowsPlace() {
+        Corner.Request video = new Corner.Request("Nursery", "rtsp://192.168.1.40/s", 0, Corner.Place.BOTTOM_LEFT, 40, null);
+        Corner.Request bell = Corner.Ring.parse(params(), new Corner.Bell(), SOURCES).request(1);
+        assertNull("by default no corner of its own", bell.place);
+        assertEquals(0, bell.size);
+        Corner.Request shown = bell.over(video);
+        assertEquals(Corner.Place.BOTTOM_LEFT, shown.place);
+        assertEquals(40, shown.size);
+        assertEquals("Doorbell", shown.bell);
+        assertSame("over an empty corner it follows the app's Corner and Size", bell, bell.over(null));
+        Corner.Request plainVideo = new Corner.Request("Nursery", "rtsp://192.168.1.40/s", 0, null, 0, null);
+        assertNull(bell.over(plainVideo).place);
+        assertSame("not a doorbell: unchanged", video, video.over(bell));
+
+        Corner.Bell own = new Corner.Bell();
+        own.place = Corner.Place.TOP_LEFT;
+        own.size = 25;
+        Corner.Request moved = Corner.Ring.parse(params(), own, SOURCES).request(1).over(video);
+        assertEquals("moved in settings: its own place", Corner.Place.TOP_LEFT, moved.place);
+        assertEquals(25, moved.size);
+        assertEquals(Corner.Place.TOP_RIGHT,
+                Corner.Ring.parse(params("corner", "top-right"), new Corner.Bell(), SOURCES).request(1).over(video).place);
+    }
+
+    @Test
+    public void doorbellPlaceSettingsCycleThroughSameAsVideo() {
+        assertNull(Corner.Bell.fromJson("{\"corner\":\"TOP_RIGHT\",\"size\":33}").place);
+        assertEquals("0.5.0's fixed default is left behind", 0, Corner.Bell.fromJson("{\"corner\":\"TOP_RIGHT\",\"size\":33}").size);
+        Corner.Place p = null;
+        for (int i = 0; i <= Corner.Place.values().length; i++) p = Corner.nextBellPlace(p);
+        assertNull("back round to the same as the video", p);
+        int s = 0;
+        for (int i = 0; i <= Corner.SIZES.length; i++) s = Corner.nextBellSize(s);
+        assertEquals(0, s);
+        assertEquals(Corner.SIZES[0], Corner.nextBellSize(0));
+    }
+
+    @Test
     public void doorbellSettingsPersist() {
         Corner.Bell b = new Corner.Bell();
         b.on = false;
@@ -477,15 +516,16 @@ public class CornerTest {
         assertFalse(back.restore);
         Corner.Bell d = Corner.Bell.fromJson("");
         assertTrue("on by default (network control is what's off by default)", d.on);
-        assertEquals(Corner.Place.TOP_RIGHT, d.place);
+        assertNull("the video window's corner by default", d.place);
+        assertEquals("and its size", 0, d.size);
         assertEquals(45, d.seconds);
         assertFalse("silent by default", d.chime);
         assertFalse(d.motion);
         assertTrue(d.restore);
-        Corner.Bell bad = Corner.Bell.fromJson("{\"seconds\": 7, \"size\": 90, \"corner\": \"middle\", \"cooldown\": 5}");
+        Corner.Bell bad = Corner.Bell.fromJson("{\"seconds\": 7, \"popupSize\": 90, \"popupCorner\": \"middle\", \"cooldown\": 5}");
         assertEquals(45, bad.seconds);
-        assertEquals(33, bad.size);
-        assertEquals(Corner.Place.TOP_RIGHT, bad.place);
+        assertEquals(0, bad.size);
+        assertNull(bad.place);
         assertEquals(60, bad.cooldown);
         assertEquals(45, Corner.Bell.fromJson("not json").seconds);
     }
