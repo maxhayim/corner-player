@@ -6,9 +6,9 @@ name, "Someone is at the door", the time, and the door camera's picture when one
 keeps playing and keeps the remote.
 
 <p align="center">
-  <img src="../assets/doorbell-mockup.svg" alt="Mockup of the doorbell popup: a camera picture with a dark banner reading Front Door, Someone is at the door, 8:42 PM, SNAPSHOT" width="720"/>
+  <img src="../assets/doorbell-popup.png" alt="The doorbell popup in the top-right corner of a TV's home screen: the door camera's picture fills it, with Front Door, Someone is at the door, 11:16 AM and LIVE over the bottom of the picture" width="720"/>
 </p>
-<p align="center"><sub>A mockup, not a screenshot.</sub></p>
+<p align="center"><sub>On a MOKA R8G over its home screen. The door camera is a test picture served as an MJPEG feed from a computer on the same network. App banners belong to their owners.</sub></p>
 
 Corner Player never talks to Ring, Nest or any other doorbell's cloud, and never needs their passwords. Something on
 your home network that already knows about the doorbell (Home Assistant, or any automation that can send an HTTP
@@ -31,13 +31,15 @@ Doorbell pressed → Home Assistant sees the event → POST /doorbell to the TV 
 
 | The camera is... | The popup shows | Tag on the banner |
 |---|---|---|
-| A video stream (RTSP, HLS) | Live video with the banner over it | `LIVE` (once the video plays) |
-| MJPEG | Pictures as they arrive, with the banner | `LIVE` |
-| A snapshot address (answers with a picture) | The picture, asked for again every second, with the banner | `SNAPSHOT` |
+| A video stream (RTSP, HLS) | Live video filling the popup, the banner over its bottom | `LIVE` (once the video plays) |
+| MJPEG | Pictures as they arrive, filling the popup, with the banner | `LIVE` |
+| A snapshot address (answers with a picture) | The picture, asked for again every second, filling the popup, with the banner | `SNAPSHOT` |
 | None set, Show: Notification only, or not found | The banner alone, as a small card | none |
 | Set but it fails (offline, expired address, wrong password) | Switches to the banner alone and keeps its timer | `NO VIDEO` |
 
-A snapshot is never called live. With no picture at all the popup still says someone is at the door: a ring is never
+The picture is cropped to fill the popup, centred, so a camera of another shape (4:3, square) loses a little at its
+edges rather than showing bars; the banner is drawn over the bottom of the picture on a fade to dark. A snapshot is
+never called live. With no picture at all the popup still says someone is at the door: a ring is never
 lost because a camera is.
 
 Repeated rings: the same press sent twice within 5 seconds changes nothing; a later ring shows the popup again with a
